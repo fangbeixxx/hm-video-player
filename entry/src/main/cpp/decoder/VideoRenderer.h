@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 /**
  * 视频渲染器 - NativeWindow 渲染封装
  * 将 YUV 数据渲染到 HarmonyOS 的 NativeWindow 上

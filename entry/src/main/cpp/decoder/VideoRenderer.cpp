@@ -1,5 +1,6 @@
 #include "VideoRenderer.h"
 #include <native_window/external_window.h>
+#include <native_buffer/native_buffer.h>
 #include <cstring>
 
 VideoRenderer::VideoRenderer() = default;
@@ -29,12 +30,13 @@ bool VideoRenderer::render(const uint8_t* yData, const uint8_t* uvData,
     int ret = OH_NativeWindow_NativeWindowRequestBuffer(nativeWin, &windowBuffer, nullptr);
     if (ret != 0 || !windowBuffer) return false;
 
-    void* bufferAddr = nullptr;
-    OH_NativeWindow_GetBufferAddrFromNative(windowBuffer, &bufferAddr);
-    if (!bufferAddr) {
-        OH_NativeWindow_NativeWindowFlushBuffer(nativeWin, windowBuffer, -1, nullptr);
+    BufferHandle* handle = OH_NativeWindow_GetBufferHandleFromNative(windowBuffer);
+    if (!handle) {
+        Region emptyRegion = {nullptr, 0};
+        OH_NativeWindow_NativeWindowFlushBuffer(nativeWin, windowBuffer, -1, emptyRegion);
         return false;
     }
+    void* bufferAddr = handle->virAddr;
 
     uint8_t* dst = (uint8_t*)bufferAddr;
     int ySize = width * height;
@@ -49,7 +51,7 @@ bool VideoRenderer::render(const uint8_t* yData, const uint8_t* uvData,
     }
 
     Region region = {nullptr, 0};
-    OH_NativeWindow_NativeWindowFlushBuffer(nativeWin, windowBuffer, -1, &region);
+    OH_NativeWindow_NativeWindowFlushBuffer(nativeWin, windowBuffer, -1, region);
     return true;
 }
 
@@ -61,14 +63,13 @@ void VideoRenderer::clear() {
 
     if (OH_NativeWindow_NativeWindowRequestBuffer(nativeWin, &windowBuffer, nullptr) == 0
         && windowBuffer) {
-        void* addr = nullptr;
-        OH_NativeWindow_GetBufferAddrFromNative(windowBuffer, &addr);
-        if (addr) {
+        BufferHandle* handle = OH_NativeWindow_GetBufferHandleFromNative(windowBuffer);
+        if (handle && handle->virAddr) {
             int size = width_ * height_ * 3 / 2;
-            memset(addr, 0, size);
+            memset(handle->virAddr, 0, size);
         }
         Region region = {nullptr, 0};
-        OH_NativeWindow_NativeWindowFlushBuffer(nativeWin, windowBuffer, -1, &region);
+        OH_NativeWindow_NativeWindowFlushBuffer(nativeWin, windowBuffer, -1, region);
     }
 }
 

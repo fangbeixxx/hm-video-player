@@ -1,0 +1,20 @@
+.git/
+*.class
+
+# IDE and build caches
+.idea/
+.hvigor/
+.codegenie/
+entry/.cxx/
+entry/build/
+entry/src/main/cpp/build_*/
+
+# Package caches
+oh_modules/
+node_modules/
+
+# FFmpeg source and build intermediates
+scripts/ffmpeg-*.tar.xz
+scripts/ffmpeg-*/
+scripts/build_*/
+*.before-neon-fix

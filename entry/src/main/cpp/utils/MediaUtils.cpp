@@ -1,10 +1,16 @@
 #include "MediaUtils.h"
-#include "decoder/FFmpegDecoder.h"
 #include <hilog/log.h>
+
+extern "C" {
+#include <libavformat/avformat.h>
+#include <libavcodec/avcodec.h>
+}
 
 #undef LOG_TAG
 #define LOG_TAG "MediaUtils"
-static constexpr unsigned int LOG_DOMAIN = 0x0201;
+static constexpr unsigned int APP_LOG_DOMAIN = 0x0201;
+#define LOGI(...) OH_LOG_Print(LOG_APP, LOG_INFO, APP_LOG_DOMAIN, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) OH_LOG_Print(LOG_APP, LOG_ERROR, APP_LOG_DOMAIN, LOG_TAG, __VA_ARGS__)
 
 double MediaUtils::getVideoDuration(const std::string& path) {
     AVFormatContext* ctx = nullptr;

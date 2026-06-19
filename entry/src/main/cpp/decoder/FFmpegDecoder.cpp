@@ -1,12 +1,13 @@
 #include "FFmpegDecoder.h"
 #include <cstring>
 #include <algorithm>
+#include <native_buffer/native_buffer.h>
 
 // HarmonyOS HiLog
-static constexpr unsigned int LOG_DOMAIN = 0x0201;
-#define LOGI(...) OH_LOG_Print(LOG_APP, LOG_INFO, LOG_DOMAIN, LOG_TAG, __VA_ARGS__)
-#define LOGW(...) OH_LOG_Print(LOG_APP, LOG_WARN, LOG_DOMAIN, LOG_TAG, __VA_ARGS__)
-#define LOGE(...) OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_DOMAIN, LOG_TAG, __VA_ARGS__)
+static constexpr unsigned int APP_LOG_DOMAIN = 0x0201;
+#define LOGI(...) OH_LOG_Print(LOG_APP, LOG_INFO, APP_LOG_DOMAIN, LOG_TAG, __VA_ARGS__)
+#define LOGW(...) OH_LOG_Print(LOG_APP, LOG_WARN, APP_LOG_DOMAIN, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) OH_LOG_Print(LOG_APP, LOG_ERROR, APP_LOG_DOMAIN, LOG_TAG, __VA_ARGS__)
 
 // ========== 构造/析构 ==========
 
@@ -202,7 +203,7 @@ bool FFmpegDecoder::openCodecs() {
             } else {
                 audioTimeBase_ = stream->time_base;
                 LOGI("Audio codec: %{public}s, %{public}dch, %{public}dHz",
-                     codec->name, audioCodecCtx_->channels, audioCodecCtx_->sample_rate);
+                     codec->name, audioCodecCtx_->ch_layout.nb_channels, audioCodecCtx_->sample_rate);
             }
         }
     }
@@ -227,15 +228,27 @@ bool FFmpegDecoder::openCodecs() {
 
     // 初始化 SWR（音频重采样）
     if (audioCodecCtx_) {
-        swrCtx_ = swr_alloc();
-        av_opt_set_int(swrCtx_, "in_channel_layout", audioCodecCtx_->channel_layout, 0);
-        av_opt_set_int(swrCtx_, "in_sample_rate", audioCodecCtx_->sample_rate, 0);
-        av_opt_set_sample_fmt(swrCtx_, "in_sample_fmt", audioCodecCtx_->sample_fmt, 0);
-        av_opt_set_int(swrCtx_, "out_channel_layout", audioCodecCtx_->channel_layout, 0);
-        av_opt_set_int(swrCtx_, "out_sample_rate", audioCodecCtx_->sample_rate, 0);
-        av_opt_set_sample_fmt(swrCtx_, "out_sample_fmt", AV_SAMPLE_FMT_S16, 0);
+        AVChannelLayout inLayout = {};
+        if (audioCodecCtx_->ch_layout.nb_channels > 0 &&
+            av_channel_layout_check(&audioCodecCtx_->ch_layout)) {
+            av_channel_layout_copy(&inLayout, &audioCodecCtx_->ch_layout);
+        } else {
+            av_channel_layout_default(&inLayout, 2);
+        }
 
-        if (swr_init(swrCtx_) < 0) {
+        AVChannelLayout outLayout = {};
+        av_channel_layout_copy(&outLayout, &inLayout);
+
+        int ret = swr_alloc_set_opts2(
+            &swrCtx_,
+            &outLayout, AV_SAMPLE_FMT_S16, audioCodecCtx_->sample_rate,
+            &inLayout, audioCodecCtx_->sample_fmt, audioCodecCtx_->sample_rate,
+            0, nullptr);
+
+        av_channel_layout_uninit(&outLayout);
+        av_channel_layout_uninit(&inLayout);
+
+        if (ret < 0 || !swrCtx_ || swr_init(swrCtx_) < 0) {
             LOGE("Failed to init SWR context");
             swr_free(&swrCtx_);
             swrCtx_ = nullptr;
@@ -411,7 +424,10 @@ bool FFmpegDecoder::decodeVideoPacket(AVPacket* packet, AVFrame* frame) {
         double pts = frame->best_effort_timestamp * av_q2d(videoTimeBase_);
 
         // 克隆帧放入队列
-        AVFrame* cloned = av_frame_clone();
+        AVFrame* cloned = av_frame_clone(frame);
+        if (!cloned) {
+            return false;
+        }
         cloned->opaque = new double(pts);
 
         {
@@ -482,7 +498,7 @@ bool FFmpegDecoder::decodeAudioPacket(AVPacket* packet, AVFrame* frame) {
                 audioFrame.size = outSize;
                 audioFrame.pts = (int64_t)(pts * 1000000);
                 audioFrame.sampleRate = audioCodecCtx_->sample_rate;
-                audioFrame.channels = audioCodecCtx_->channels;
+                audioFrame.channels = audioCodecCtx_->ch_layout.nb_channels;
 
                 if (callbacks_.onAudioFrame) {
                     callbacks_.onAudioFrame(audioFrame);
@@ -498,7 +514,10 @@ bool FFmpegDecoder::resampleAudio(AVFrame* srcFrame, uint8_t** dstData, int* dst
     if (!swrCtx_) return false;
 
     int outSamples = swr_get_out_samples(swrCtx_, srcFrame->nb_samples);
-    int bytesPerSample = 2 * srcFrame->channels; // S16 format
+    int channels = srcFrame->ch_layout.nb_channels > 0
+        ? srcFrame->ch_layout.nb_channels
+        : audioCodecCtx_->ch_layout.nb_channels;
+    int bytesPerSample = 2 * channels; // S16 format
     *dstSize = outSamples * bytesPerSample;
     *dstData = new uint8_t[*dstSize];
 
@@ -565,8 +584,14 @@ void FFmpegDecoder::renderLoop() {
 
             // 渲染到 NativeWindow
             if (nativeWindow_) {
-                renderToWindow({dstData, dstLinesize,
-                    frame->width, frame->height, (int64_t)(pts * 1000000), AV_PIX_FMT_NV12});
+                VideoFrame renderFrame;
+                memcpy(renderFrame.data, dstData, sizeof(dstData));
+                memcpy(renderFrame.linesize, dstLinesize, sizeof(dstLinesize));
+                renderFrame.width = frame->width;
+                renderFrame.height = frame->height;
+                renderFrame.pts = static_cast<int64_t>(pts * 1000000);
+                renderFrame.format = AV_PIX_FMT_NV12;
+                renderToWindow(renderFrame);
             }
 
             // 通知视频帧（用于 UI 回调）
@@ -606,12 +631,13 @@ void FFmpegDecoder::renderToWindow(const VideoFrame& frame) {
     if (ret != 0) return;
 
     // 获取缓冲区信息
-    void* bufferAddr = nullptr;
-    OH_NativeWindow_GetBufferAddrFromNative(windowBuffer, &bufferAddr);
-    if (!bufferAddr) {
-        OH_NativeWindow_NativeWindowFlushBuffer(nativeWindow_, windowBuffer, -1, nullptr);
+    BufferHandle* handle = OH_NativeWindow_GetBufferHandleFromNative(windowBuffer);
+    if (!handle || !handle->virAddr) {
+        Region emptyRegion = {nullptr, 0};
+        OH_NativeWindow_NativeWindowFlushBuffer(nativeWindow_, windowBuffer, -1, emptyRegion);
         return;
     }
+    void* bufferAddr = handle->virAddr;
 
     int bufferWidth, bufferHeight;
     OH_NativeWindow_NativeWindowHandleOpt(nativeWindow_, GET_BUFFER_GEOMETRY,
@@ -633,5 +659,5 @@ void FFmpegDecoder::renderToWindow(const VideoFrame& frame) {
     }
 
     Region region = {nullptr, 0};
-    OH_NativeWindow_NativeWindowFlushBuffer(nativeWindow_, windowBuffer, -1, &region);
+    OH_NativeWindow_NativeWindowFlushBuffer(nativeWindow_, windowBuffer, -1, region);
 }

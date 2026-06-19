@@ -24,7 +24,7 @@
             "actions": ["action.system.home"]
           }
         ],
-        "supportWindowMode": ["full-screen", "split", "floating"],
+        "supportWindowMode": ["fullscreen", "split", "floating"],
         "preferMultiWindowOrientation": "landscape"
       }
     ],

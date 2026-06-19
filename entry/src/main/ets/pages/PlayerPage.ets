@@ -1,9 +1,13 @@
 import { router } from '@kit.ArkUI';
 import { VideoPlayerView } from '../components/VideoPlayerView';
 
-/**
- * 播放页面
- */
+interface PlayerRouteParams {
+  videoId?: string;
+  videoPath?: string;
+  videoTitle?: string;
+  seekTo?: number;
+}
+
 @Entry
 @Component
 struct PlayerPage {
@@ -13,18 +17,17 @@ struct PlayerPage {
   @State seekTo: number = 0;
 
   aboutToAppear(): void {
-    const params = router.getParams() as Record<string, string | number>;
+    const params = router.getParams() as PlayerRouteParams;
     if (params) {
-      this.videoId = (params['videoId'] as string) || '';
-      this.videoPath = (params['videoPath'] as string) || '';
-      this.videoTitle = (params['videoTitle'] as string) || '未知视频';
-      this.seekTo = (params['seekTo'] as number) || 0;
+      this.videoId = params.videoId || '';
+      this.videoPath = params.videoPath || '';
+      this.videoTitle = params.videoTitle || 'Unknown video';
+      this.seekTo = params.seekTo || 0;
     }
   }
 
   build() {
     Column() {
-      // 顶部标题栏
       Row() {
         Image($r('app.media.ic_arrow_back'))
           .width(24)
@@ -45,7 +48,6 @@ struct PlayerPage {
       .padding({ left: 16, right: 16 })
       .backgroundColor('#000000')
 
-      // 视频播放区域
       VideoPlayerView({
         videoPath: this.videoPath,
         videoTitle: this.videoTitle,

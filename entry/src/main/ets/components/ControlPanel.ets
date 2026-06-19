@@ -6,13 +6,13 @@ import { PlayerState, PlaybackSpeed } from '../common/Enums';
  */
 @Component
 export struct ControlPanel {
-  @Link currentTime: number;
-  @Link duration: number;
-  @Link isPlaying: boolean;
-  @Link playerState: PlayerState;
-  @Link currentSpeed: PlaybackSpeed;
-  @Link isMuted: boolean;
-  @Link isBuffering: boolean;
+  @Prop currentTime: number;
+  @Prop duration: number;
+  @Prop isPlaying: boolean;
+  @Prop playerState: PlayerState;
+  @Prop currentSpeed: PlaybackSpeed;
+  @Prop isMuted: boolean;
+  @Prop isBuffering: boolean;
 
   onPlayPause: () => void = () => {};
   onSeek: (timeMs: number) => void = () => {};
@@ -43,7 +43,7 @@ export struct ControlPanel {
     this.clearTimer();
     this.timerId = setTimeout(() => {
       this.showControls = false;
-    }, 5000) as unknown as number;
+    }, 5000);
   }
 
   private clearTimer(): void {

@@ -5,7 +5,7 @@
  * 模块注册 - 将 NAPI 函数导出到 ArkTS
  *
  * 使用方式 (ArkTS):
- *   import nativeModule from 'libharmonyos_video_player.so';
+ *   import nativeModule from 'libharmonyos-video-player.so';
  *
  *   // 创建解码器
  *   const handle = nativeModule.createDecoder();
@@ -84,7 +84,7 @@ static napi_module g_module = {
     .nm_flags = 0,
     .nm_filename = nullptr,
     .nm_register_func = Init,
-    .nm_modname = "harmonyos_video_player",
+    .nm_modname = "harmonyos-video-player",
     .nm_priv = nullptr,
     .reserved = {0},
 };

@@ -132,7 +132,7 @@ export class VideoPlayerManager {
         if (FFmpegNative.isAvailable()) {
           await this.setupFFmpegSource(filePath);
         } else {
-          throw e;
+          throw new Error('AVPlayer failed and FFmpeg is unavailable');
         }
       }
     }
@@ -154,7 +154,7 @@ export class VideoPlayerManager {
         if (FFmpegNative.isAvailable()) {
           await this.setupFFmpegSource(url);
         } else {
-          throw e;
+          throw new Error('AVPlayer failed for URL and FFmpeg is unavailable');
         }
       }
     }
@@ -209,8 +209,7 @@ export class VideoPlayerManager {
     });
 
     this.avPlayer.on('bufferingUpdate', (type: media.BufferingInfoType) => {
-      this._isBuffering = (type === media.BufferingInfoType.BUFFERING_START ||
-        type === media.BufferingInfoType.BUFFERING_LOADING);
+      this._isBuffering = type === media.BufferingInfoType.BUFFERING_START;
       this.callback?.onBufferingUpdate?.(this._isBuffering);
     });
 
@@ -266,7 +265,7 @@ export class VideoPlayerManager {
         this._currentTime = timeSec * 1000;
         this.callback?.onTimeUpdate?.(this._currentTime);
       }
-    }, 200) as unknown as number;
+    }, 200);
   }
 
   private stopTimePoll(): void {
@@ -338,7 +337,7 @@ export class VideoPlayerManager {
     if (this.useFFmpeg && this.ffmpegDecoder) {
       this.ffmpegDecoder.setSpeed(speed);
     } else if (this.avPlayer) {
-      this.avPlayer.setSpeed(speed as media.PlaybackSpeed);
+      this.avPlayer.setSpeed(this.toMediaPlaybackSpeed(speed));
     }
   }
 
@@ -429,19 +428,47 @@ export class VideoPlayerManager {
   }
 
   private mapState(state: string): PlayerState {
-    const stateMap: Record<string, PlayerState> = {
-      'idle': PlayerState.IDLE,
-      'initialized': PlayerState.INITIALIZED,
-      'preparing': PlayerState.PREPARING,
-      'prepared': PlayerState.PREPARED,
-      'playing': PlayerState.PLAYING,
-      'paused': PlayerState.PAUSED,
-      'stopped': PlayerState.STOPPED,
-      'completed': PlayerState.COMPLETED,
-      'error': PlayerState.ERROR,
-      'released': PlayerState.IDLE
-    };
-    return stateMap[state] || PlayerState.IDLE;
+    switch (state) {
+      case 'idle':
+        return PlayerState.IDLE;
+      case 'initialized':
+        return PlayerState.INITIALIZED;
+      case 'preparing':
+        return PlayerState.PREPARING;
+      case 'prepared':
+        return PlayerState.PREPARED;
+      case 'playing':
+        return PlayerState.PLAYING;
+      case 'paused':
+        return PlayerState.PAUSED;
+      case 'stopped':
+        return PlayerState.STOPPED;
+      case 'completed':
+        return PlayerState.COMPLETED;
+      case 'error':
+        return PlayerState.ERROR;
+      case 'released':
+        return PlayerState.IDLE;
+      default:
+        return PlayerState.IDLE;
+    }
+  }
+
+  private toMediaPlaybackSpeed(speed: PlaybackSpeed): media.PlaybackSpeed {
+    switch (speed) {
+      case PlaybackSpeed.SPEED_0_5:
+        return media.PlaybackSpeed.SPEED_FORWARD_0_50_X;
+      case PlaybackSpeed.SPEED_0_75:
+        return media.PlaybackSpeed.SPEED_FORWARD_0_75_X;
+      case PlaybackSpeed.SPEED_1_25:
+        return media.PlaybackSpeed.SPEED_FORWARD_1_25_X;
+      case PlaybackSpeed.SPEED_1_5:
+        return media.PlaybackSpeed.SPEED_FORWARD_1_50_X;
+      case PlaybackSpeed.SPEED_2_0:
+        return media.PlaybackSpeed.SPEED_FORWARD_2_00_X;
+      default:
+        return media.PlaybackSpeed.SPEED_FORWARD_1_00_X;
+    }
   }
 
   /**

@@ -1,4 +1,5 @@
 {
+  "modelVersion": "5.0.0",
   "name": "video-player",
   "version": "1.0.0",
   "description": "HarmonyOS Tablet Video Player",

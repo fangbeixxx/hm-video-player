@@ -2,9 +2,6 @@ import { router } from '@kit.ArkUI';
 import { PlayHistoryService } from '../service/PlayHistoryService';
 import { PlaybackSpeed, ScreenOrientation } from '../common/Enums';
 
-/**
- * 设置页面
- */
 @Entry
 @Component
 struct SettingsPage {
@@ -23,14 +20,11 @@ struct SettingsPage {
     try {
       const history = await this.historyService.getHistory();
       this.historyCount = history.length;
-    } catch (e) {
-      console.error('Load settings failed:', e);
+    } catch (error) {
+      console.error('Load settings failed.');
     }
   }
 
-  /**
-   * 清空播放历史
-   */
   private async clearHistory(): Promise<void> {
     await this.historyService.clearHistory();
     this.historyCount = 0;
@@ -38,7 +32,6 @@ struct SettingsPage {
 
   build() {
     Column() {
-      // 顶部栏
       Row() {
         Image($r('app.media.ic_arrow_back'))
           .width(24)
@@ -46,7 +39,7 @@ struct SettingsPage {
           .fillColor('#333333')
           .onClick(() => router.back())
 
-        Text('设置')
+        Text('Settings')
           .fontSize(20)
           .fontWeight(FontWeight.Bold)
           .fontColor('#333333')
@@ -58,80 +51,76 @@ struct SettingsPage {
       .backgroundColor('#FFFFFF')
 
       List({ space: 0 }) {
-        // 播放设置
         ListItem() {
-          this.SectionHeader('播放设置')
+          this.SectionHeader('Playback')
         }
 
         ListItem() {
-          this.SwitchItem('自动播放下一集', this.autoPlayNext, (val: boolean) => {
+          this.SwitchItem('Auto play next', this.autoPlayNext, (val: boolean) => {
             this.autoPlayNext = val;
           })
         }
 
         ListItem() {
-          this.SwitchItem('硬件加速', this.hwAcceleration, (val: boolean) => {
+          this.SwitchItem('Hardware acceleration', this.hwAcceleration, (val: boolean) => {
             this.hwAcceleration = val;
           })
         }
 
         ListItem() {
-          this.SwitchItem('后台播放', this.backgroundPlay, (val: boolean) => {
+          this.SwitchItem('Background play', this.backgroundPlay, (val: boolean) => {
             this.backgroundPlay = val;
           })
         }
 
         ListItem() {
-          this.SelectItem('默认播放速度', this.getSpeedLabel(this.defaultSpeed), () => {
+          this.SelectItem('Default speed', this.getSpeedLabel(this.defaultSpeed), () => {
             this.cycleSpeed();
           })
         }
 
-        // 显示设置
         ListItem() {
-          this.SectionHeader('显示设置')
+          this.SectionHeader('Display')
         }
 
         ListItem() {
-          this.SelectItem('屏幕方向', this.getOrientationLabel(this.orientation), () => {
+          this.SelectItem('Orientation', this.getOrientationLabel(this.orientation), () => {
             this.cycleOrientation();
           })
         }
 
         ListItem() {
-          this.SwitchItem('显示字幕', this.showSubtitle, (val: boolean) => {
+          this.SwitchItem('Show subtitles', this.showSubtitle, (val: boolean) => {
             this.showSubtitle = val;
           })
         }
 
-        // 网络设置
         ListItem() {
-          this.SectionHeader('网络设置')
+          this.SectionHeader('Network')
         }
 
         ListItem() {
-          this.SwitchItem('仅在 WiFi 下播放在线视频', this.wifiOnly, (val: boolean) => {
+          this.SwitchItem('Wi-Fi only', this.wifiOnly, (val: boolean) => {
             this.wifiOnly = val;
           })
         }
 
-        // 数据管理
         ListItem() {
-          this.SectionHeader('数据管理')
+          this.SectionHeader('Data')
         }
 
         ListItem() {
           Row() {
-            Text('播放历史')
+            Text('Playback history')
               .fontSize(15)
               .fontColor('#333333')
               .layoutWeight(1)
 
-            Text(`${this.historyCount} 条记录`)
+            Text(`${this.historyCount} records`)
               .fontSize(13)
               .fontColor('#999999')
 
-            Text('清空')
+            Text('Clear')
               .fontSize(14)
               .fontColor('#FF4081')
               .margin({ left: 12 })
@@ -143,14 +132,13 @@ struct SettingsPage {
           .backgroundColor('#FFFFFF')
         }
 
-        // 关于
         ListItem() {
-          this.SectionHeader('关于')
+          this.SectionHeader('About')
         }
 
         ListItem() {
           Row() {
-            Text('版本')
+            Text('Version')
               .fontSize(15)
               .fontColor('#333333')
               .layoutWeight(1)
@@ -167,14 +155,12 @@ struct SettingsPage {
       }
       .layoutWeight(1)
       .scrollBar(BarState.Off)
-      .divider({ color: '#F0F0F0', height: 0.5 })
+      .divider({ color: '#F0F0F0', strokeWidth: 1 })
     }
     .width('100%')
     .height('100%')
     .backgroundColor('#F5F5F5')
   }
-
-  // ========== Builder 组件 ==========
 
   @Builder
   SectionHeader(title: string) {
@@ -228,22 +214,25 @@ struct SettingsPage {
     .onClick(() => onClick())
   }
 
-  // ========== 辅助方法 ==========
-
   private getSpeedLabel(speed: PlaybackSpeed): string {
-    const labels: Record<number, string> = {
-      0.5: '0.5x',
-      0.75: '0.75x',
-      1.0: '1.0x（正常）',
-      1.25: '1.25x',
-      1.5: '1.5x',
-      2.0: '2.0x'
-    };
-    return labels[speed as number] || '1.0x';
+    switch (speed) {
+      case PlaybackSpeed.SPEED_0_5:
+        return '0.5x';
+      case PlaybackSpeed.SPEED_0_75:
+        return '0.75x';
+      case PlaybackSpeed.SPEED_1_25:
+        return '1.25x';
+      case PlaybackSpeed.SPEED_1_5:
+        return '1.5x';
+      case PlaybackSpeed.SPEED_2_0:
+        return '2.0x';
+      default:
+        return '1.0x';
+    }
   }
 
   private cycleSpeed(): void {
-    const speeds = [
+    const speeds: PlaybackSpeed[] = [
       PlaybackSpeed.SPEED_0_5,
       PlaybackSpeed.SPEED_0_75,
       PlaybackSpeed.SPEED_1_0,
@@ -256,16 +245,22 @@ struct SettingsPage {
   }
 
   private getOrientationLabel(orientation: ScreenOrientation): string {
-    const labels: Record<string, string> = {
-      'auto': '自动',
-      'landscape': '横屏',
-      'portrait': '竖屏'
-    };
-    return labels[orientation] || '自动';
+    switch (orientation) {
+      case ScreenOrientation.LANDSCAPE:
+        return 'Landscape';
+      case ScreenOrientation.PORTRAIT:
+        return 'Portrait';
+      default:
+        return 'Auto';
+    }
   }
 
   private cycleOrientation(): void {
-    const orientations = [ScreenOrientation.AUTO, ScreenOrientation.LANDSCAPE, ScreenOrientation.PORTRAIT];
+    const orientations: ScreenOrientation[] = [
+      ScreenOrientation.AUTO,
+      ScreenOrientation.LANDSCAPE,
+      ScreenOrientation.PORTRAIT
+    ];
     const idx = orientations.indexOf(this.orientation);
     this.orientation = orientations[(idx + 1) % orientations.length];
   }

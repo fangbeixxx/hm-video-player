@@ -18,29 +18,36 @@ FFMPEG_VERSION="7.0"
 ARCH=${1:-arm64-v8a}
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 BUILD_DIR="${SCRIPT_DIR}/build_${ARCH}"
-OUTPUT_DIR="${SCRIPT_DIR}/libs/ffmpeg"
+OUTPUT_DIR="${SCRIPT_DIR}/../entry/src/main/cpp/libs/ffmpeg"
 SRC_DIR="${SCRIPT_DIR}/ffmpeg-${FFMPEG_VERSION}"
 
 # HarmonyOS NDK 路径
-OHOS_NDK=${OHOS_NDK:-"$HOME/Library/OpenHarmony/Sdk/12/native"}
+OHOS_NDK=${OHOS_NDK:-"/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/native"}
 TOOLCHAIN="${OHOS_NDK}/llvm"
-SYSROOT="${TOOLCHAIN}/sysroot"
+SYSROOT="${OHOS_NDK}/sysroot"
 
 # 根据架构设置编译参数
 if [ "$ARCH" = "arm64-v8a" ]; then
-    TARGET_HOST="aarch64-linux-ohos"
-    CC_PREFIX="aarch64"
+    CC_TRIPLE="aarch64-unknown-linux-ohos"
+    CLANG_TARGET="aarch64-linux-ohos"
+    FF_ARCH="aarch64"
 elif [ "$ARCH" = "x86_64" ]; then
-    TARGET_HOST="x86_64-linux-ohos"
-    CC_PREFIX="x86_64"
+    CC_TRIPLE="x86_64-unknown-linux-ohos"
+    CLANG_TARGET="x86_64-linux-ohos"
+    FF_ARCH="x86_64"
 else
     echo "不支持的架构: $ARCH"
     echo "支持: arm64-v8a, x86_64"
     exit 1
 fi
 
-CFLAGS="--target=${CC_PREFIX}-linux-ohos --sysroot=${SYSROOT} -D__MUSL__"
-LDFLAGS="--target=${CC_PREFIX}-linux-ohos --sysroot=${SYSROOT}"
+if [ -x "${TOOLCHAIN}/bin/${CC_TRIPLE}-clang" ]; then
+    CC="${TOOLCHAIN}/bin/${CC_TRIPLE}-clang"
+    CXX="${TOOLCHAIN}/bin/${CC_TRIPLE}-clang++"
+else
+    CC="${TOOLCHAIN}/bin/clang --target=${CLANG_TARGET}"
+    CXX="${TOOLCHAIN}/bin/clang++ --target=${CLANG_TARGET}"
+fi
 
 echo "============================================"
 echo "  FFmpeg ${FFMPEG_VERSION} for HarmonyOS"
@@ -64,28 +71,33 @@ echo ">>> 配置 FFmpeg..."
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
-../configure \
+"$SRC_DIR/configure" \
     --prefix="${BUILD_DIR}/install" \
     --enable-cross-compile \
-    --cross-prefix="${TOOLCHAIN}/bin/${CC_PREFIX}-linux-ohos-" \
-    --target-os=android \
-    --arch=${CC_PREFIX} \
-    --cc="${TOOLCHAIN}/bin/clang" \
-    --cxx="${TOOLCHAIN}/bin/clang++" \
+    --target-os=linux \
+    --arch=${FF_ARCH} \
+    --cc="${CC}" \
+    --cxx="${CXX}" \
     --ar="${TOOLCHAIN}/bin/llvm-ar" \
     --nm="${TOOLCHAIN}/bin/llvm-nm" \
     --ranlib="${TOOLCHAIN}/bin/llvm-ranlib" \
     --strip="${TOOLCHAIN}/bin/llvm-strip" \
     --sysroot="${SYSROOT}" \
-    --extra-cflags="${CFLAGS}" \
-    --extra-ldflags="${LDFLAGS}" \
+    --extra-cflags="-fPIC -D__MUSL__" \
     --enable-static \
     --disable-shared \
     --disable-doc \
     --disable-programs \
     --disable-everything \
     --enable-pic \
+    --disable-asm \
     --enable-small \
+    --disable-vulkan \
+    --disable-vaapi \
+    --disable-vdpau \
+    --disable-cuda \
+    --disable-cuvid \
+    --disable-nvenc \
     \
     --enable-demuxer=matroska \
     --enable-demuxer=mov \

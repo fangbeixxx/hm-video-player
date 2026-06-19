@@ -11,10 +11,10 @@ export class PlayHistoryService {
   private prefs: preferences.Preferences | null = null;
 
   static getInstance(): PlayHistoryService {
-    if (!this.instance) {
-      this.instance = new PlayHistoryService();
+    if (PlayHistoryService.instance === null) {
+      PlayHistoryService.instance = new PlayHistoryService();
     }
-    return this.instance;
+    return PlayHistoryService.instance;
   }
 
   /**
@@ -98,7 +98,7 @@ export class PlayHistoryService {
   async addFavorite(videoId: string): Promise<void> {
     const prefs = await this.getPrefs();
     const favorites = await this.getFavorites();
-    if (!favorites.includes(videoId)) {
+    if (favorites.indexOf(videoId) < 0) {
       favorites.push(videoId);
       await prefs.put('favorites_list', JSON.stringify(favorites));
       await prefs.flush();
@@ -114,6 +114,6 @@ export class PlayHistoryService {
 
   async isFavorite(videoId: string): Promise<boolean> {
     const favorites = await this.getFavorites();
-    return favorites.includes(videoId);
+    return favorites.indexOf(videoId) >= 0;
   }
 }

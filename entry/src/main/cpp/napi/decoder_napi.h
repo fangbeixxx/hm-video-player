@@ -9,7 +9,7 @@
  * NAPI 桥接层 - 将 FFmpegDecoder 暴露给 ArkTS
  *
  * ArkTS 调用方式:
- *   import nativeModule from 'libharmonyos_video_player.so';
+ *   import nativeModule from 'libharmonyos-video-player.so';
  *   const decoder = nativeModule.createDecoder();
  *   nativeModule.open(decoder, '/path/to/video.mkv');
  *   nativeModule.play(decoder);

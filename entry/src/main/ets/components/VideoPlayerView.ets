@@ -1,20 +1,15 @@
-import { media } from '@kit.MediaKit';
-import { VideoPlayerManager, PlayerCallback, PlaybackEngine } from '../service/VideoPlayerManager';
+import { VideoPlayerManager } from '../service/VideoPlayerManager';
 import { ControlPanel } from './ControlPanel';
-import { ErrorDialog, ErrorToast } from './ErrorDialog';
+import { ErrorToast } from './ErrorDialog';
 import { PlayerState, PlaybackSpeed } from '../common/Enums';
-import { PlayerError, PlayerErrorCode, createPlayerError, mapFFmpegError } from '../common/PlayerError';
+import { PlayerError, PlayerErrorCode, createPlayerError } from '../common/PlayerError';
 import { PlayHistoryService } from '../service/PlayHistoryService';
 
-/**
- * 视频播放视图组件
- * 包含 Video 组件、控制面板和错误处理
- */
 @Component
 export struct VideoPlayerView {
-  @Link videoPath: string;
-  @Link videoTitle: string;
-  @Link videoId: string;
+  @Prop videoPath: string;
+  @Prop videoTitle: string;
+  @Prop videoId: string;
 
   onBack: () => void = () => {};
   onNext: () => void = () => {};
@@ -29,17 +24,12 @@ export struct VideoPlayerView {
   @State currentSpeed: PlaybackSpeed = PlaybackSpeed.SPEED_1_0;
   @State isMuted: boolean = false;
   @State isFullscreen: boolean = false;
-
-  // 错误状态
   @State showErrorDialog: boolean = false;
   @State showErrorToast: boolean = false;
   @State currentError: PlayerError | null = null;
   @State toastMessage: string = '';
-
-  // 引擎信息
   @State engineType: string = '';
 
-  private surfaceId: string = '';
   private saveTimerId: number = -1;
 
   async aboutToAppear(): Promise<void> {
@@ -50,11 +40,10 @@ export struct VideoPlayerView {
       },
       onTimeUpdate: (timeMs: number) => {
         this.currentTime = timeMs;
-        // 定期保存播放进度（每5秒）
         if (this.saveTimerId < 0) {
           this.saveTimerId = setInterval(() => {
             this.saveProgress();
-          }, 5000) as unknown as number;
+          }, 5000);
         }
       },
       onDurationUpdate: (dur: number) => {
@@ -71,7 +60,6 @@ export struct VideoPlayerView {
       }
     });
 
-    // 设置播放源并开始播放
     try {
       if (this.videoPath.startsWith('http')) {
         await this.playerManager.setUrlSource(this.videoPath);
@@ -80,10 +68,9 @@ export struct VideoPlayerView {
       }
       this.engineType = this.playerManager.engineType;
       await this.playerManager.play();
-    } catch (e) {
-      const errMsg = (e as Error).message || '未知错误';
-      const error = createPlayerError(PlayerErrorCode.UNKNOWN, errMsg);
-      this.handleError(error);
+    } catch (error) {
+      const playerError = createPlayerError(PlayerErrorCode.UNKNOWN, 'Unable to start playback.');
+      this.handleError(playerError);
     }
   }
 
@@ -96,38 +83,28 @@ export struct VideoPlayerView {
     await this.playerManager.release();
   }
 
-  /**
-   * 处理错误
-   */
   private handleError(error: PlayerError): void {
-    console.error(`播放错误 [${error.code}]: ${error.message}`);
+    console.error(`Playback error [${error.code}]: ${error.message}`);
 
-    // 某些错误用 Toast（非阻断式）
     if (error.code === PlayerErrorCode.FILE_NO_AUDIO_STREAM ||
         error.code === PlayerErrorCode.AUDIO_OUTPUT_ERROR) {
       this.toastMessage = error.message;
       this.showErrorToast = true;
-      // Toast 5秒后自动消失
       setTimeout(() => {
         this.showErrorToast = false;
-      }, 5000) as unknown as number;
+      }, 5000);
       return;
     }
 
-    // 其他错误用弹窗
     this.currentError = error;
     this.showErrorDialog = true;
   }
 
-  /**
-   * 重试播放
-   */
   private async retryPlay(): Promise<void> {
     this.currentError = null;
     this.showErrorDialog = false;
 
     try {
-      // 重新初始化播放器
       await this.playerManager.release();
       await this.playerManager.init();
 
@@ -138,18 +115,14 @@ export struct VideoPlayerView {
       }
       this.engineType = this.playerManager.engineType;
       await this.playerManager.play();
-    } catch (e) {
-      const errMsg = (e as Error).message || '重试失败';
-      const error = createPlayerError(PlayerErrorCode.UNKNOWN, `重试失败: ${errMsg}`);
-      this.handleError(error);
+    } catch (error) {
+      this.handleError(createPlayerError(PlayerErrorCode.UNKNOWN, 'Retry failed.'));
     }
   }
 
-  /**
-   * 保存播放进度
-   */
   private async saveProgress(): Promise<void> {
     if (this.duration <= 0) return;
+
     try {
       await PlayHistoryService.getInstance().saveRecord({
         videoId: this.videoId,
@@ -159,17 +132,15 @@ export struct VideoPlayerView {
         duration: this.duration,
         timestamp: Date.now()
       });
-    } catch (e) {
-      console.warn('Save progress failed:', e);
+    } catch (error) {
+      console.warn('Save progress failed.');
     }
   }
 
   build() {
     Stack() {
-      // 视频渲染区域
       Video({
-        src: this.videoPath,
-        surfaceId: this.surfaceId
+        src: this.videoPath
       })
         .width('100%')
         .height('100%')
@@ -185,17 +156,11 @@ export struct VideoPlayerView {
         })
         .onError(() => {
           this.isPlaying = false;
-          // Video 组件的 error 回调信息有限，提示用户
-          if (!this.currentError) {
-            const error = createPlayerError(
-              PlayerErrorCode.DECODE_ERROR,
-              '系统 Video 组件播放出错，可尝试切换到软解码模式'
-            );
-            this.handleError(error);
+          if (this.currentError === null) {
+            this.handleError(createPlayerError(PlayerErrorCode.DECODE_ERROR, 'System video component reported an error.'));
           }
         })
 
-      // 控制面板覆盖层
       ControlPanel({
         currentTime: this.currentTime,
         duration: this.duration,
@@ -231,8 +196,7 @@ export struct VideoPlayerView {
         }
       })
 
-      // 引擎类型标签（调试用，可移除）
-      if (this.engineType) {
+      if (this.engineType.length > 0) {
         Row() {
           Text(this.engineType)
             .fontSize(10)
@@ -246,13 +210,14 @@ export struct VideoPlayerView {
         .padding({ right: 8, top: 4 })
       }
 
-      // 错误提示条（非阻断式）
       ErrorToast({
         visible: this.showErrorToast,
         message: this.toastMessage,
         retryable: true,
         onRetry: () => this.retryPlay(),
-        onDismiss: () => { this.showErrorToast = false; }
+        onDismiss: () => {
+          this.showErrorToast = false;
+        }
       })
         .width('100%')
         .position({ x: 0, y: 48 })
@@ -261,7 +226,7 @@ export struct VideoPlayerView {
     .height('100%')
     .backgroundColor('#000000')
     .bindSheet($$this.showErrorDialog, this.ErrorSheetBuilder(), {
-      height: SheetSize.AUTO,
+      height: SheetSize.MEDIUM,
       preferType: SheetType.CENTER,
       maskColor: 'rgba(0,0,0,0.6)',
       showClose: false
@@ -271,18 +236,19 @@ export struct VideoPlayerView {
   @Builder
   ErrorSheetBuilder() {
     Column({ space: 0 }) {
-      // 头部图标 + 标题
       Column({ space: 12 }) {
         Stack() {
           Circle()
             .width(64)
             .height(64)
-            .fillColor('#FFF3E0')
-          Text('⚠')
+            .fill('#FFF3E0')
+          Text('!')
             .fontSize(32)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#FF9800')
         }
 
-        Text(this.currentError?.title || '播放失败')
+        Text(this.currentError?.title || 'Playback failed')
           .fontSize(20)
           .fontWeight(FontWeight.Bold)
           .fontColor('#333333')
@@ -291,9 +257,8 @@ export struct VideoPlayerView {
       .width('100%')
       .padding({ top: 24, bottom: 16 })
 
-      // 错误码
       Row() {
-        Text(`错误码: ${this.currentError?.code || 0}`)
+        Text(`Error code: ${this.currentError?.code || 0}`)
           .fontSize(11)
           .fontColor('#999999')
           .padding({ left: 8, right: 8, top: 3, bottom: 3 })
@@ -306,29 +271,22 @@ export struct VideoPlayerView {
 
       Divider().color('#F0F0F0').height(1)
 
-      // 错误消息
       Column({ space: 8 }) {
-        Text(this.currentError?.message || '发生未知错误')
+        Text(this.currentError?.message || 'Unknown playback error.')
           .fontSize(15)
           .fontColor('#555555')
           .textAlign(TextAlign.Center)
           .padding({ top: 16 })
 
         if (this.currentError?.suggestion) {
-          Row({ space: 6 }) {
-            Text('💡')
-              .fontSize(14)
-            Text(this.currentError?.suggestion || '')
-              .fontSize(13)
-              .fontColor('#888888')
-              .layoutWeight(1)
-          }
-          .width('100%')
-          .padding({ left: 24, right: 24, top: 8 })
-          .alignItems(VerticalAlign.Top)
+          Text(this.currentError?.suggestion || '')
+            .fontSize(13)
+            .fontColor('#888888')
+            .width('100%')
+            .textAlign(TextAlign.Center)
+            .padding({ left: 24, right: 24, top: 8 })
         }
 
-        // 技术详情
         if (this.currentError?.detail) {
           Text(this.currentError?.detail || '')
             .fontSize(11)
@@ -346,9 +304,8 @@ export struct VideoPlayerView {
 
       Divider().color('#F0F0F0').height(1)
 
-      // 按钮栏
       Row({ space: 0 }) {
-        Button('关闭')
+        Button('Close')
           .fontSize(15)
           .fontColor('#999999')
           .backgroundColor('#FFFFFF')
@@ -360,10 +317,10 @@ export struct VideoPlayerView {
             this.showErrorDialog = false;
           })
 
-        Divider().vertical(true).color('#F0F0F0').height(32)
-
         if (this.currentError?.retryable) {
-          Button('重试')
+          Divider().vertical(true).color('#F0F0F0').height(32)
+
+          Button('Retry')
             .fontSize(15)
             .fontColor('#FF4081')
             .fontWeight(FontWeight.Medium)

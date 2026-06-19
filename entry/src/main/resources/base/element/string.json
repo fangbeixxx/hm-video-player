@@ -2,23 +2,23 @@
   "string": [
     {
       "name": "module_desc",
-      "value": "鸿蒙平板视频播放器"
+      "value": "HarmonyOS tablet video player"
     },
     {
       "name": "EntryAbility_desc",
-      "value": "视频播放器主界面"
+      "value": "Video player main screen"
     },
     {
       "name": "EntryAbility_label",
-      "value": "视频播放器"
+      "value": "Video Player"
     },
     {
       "name": "permission_read_media_reason",
-      "value": "读取设备视频文件用于播放"
+      "value": "Read local video files for playback"
     },
     {
       "name": "permission_internet_reason",
-      "value": "播放在线视频内容"
+      "value": "Play online video content"
     }
   ]
 }

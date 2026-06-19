@@ -124,8 +124,10 @@ struct SearchPage {
             List({ space: 8 }) {
               ForEach(this.searchResults, (video: VideoItemObserved) => {
                 ListItem() {
-                  VideoCard({ video: video })
-                    .onClicked((v: VideoItem) => this.goToPlayer(v))
+                  VideoCard({
+                    video: video,
+                    onClicked: (v: VideoItem) => this.goToPlayer(v)
+                  })
                 }
               })
             }

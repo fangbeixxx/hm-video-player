@@ -127,8 +127,11 @@ struct Index {
         List({ space: 8 }) {
           ForEach(this.allVideos, (video: VideoItemObserved) => {
             ListItem() {
-              VideoCard({ video: video, showDate: true })
-                .onClicked((v: VideoItem) => this.goToPlayer(v))
+              VideoCard({
+                video: video,
+                showDate: true,
+                onClicked: (v: VideoItem) => this.goToPlayer(v)
+              })
             }
           })
         }
