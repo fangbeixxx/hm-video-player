@@ -18,7 +18,9 @@ interface NativeDecoderModule {
   getHeight(handle: number): number;
   getVideoCodec(handle: number): string;
   getAudioCodec(handle: number): string;
-  setSurface(handle: number, surfaceId: string): void;
+  setSurfaceId(handle: number, surfaceId: string): boolean;
+  setXComponentId(handle: number, xComponentId: string): boolean;
+  registerXComponentSurface(xComponentId: string, context: Object): boolean;
   getMediaInfo(path: string): MediaInfo;
   isCodecSupported(codecName: string): boolean;
 }
@@ -99,8 +101,12 @@ export class FFmpegDecoderInstance {
     return this.native.getAudioCodec(this.handle);
   }
 
-  setSurface(surfaceId: string): void {
-    this.native.setSurface(this.handle, surfaceId);
+  setSurfaceId(surfaceId: string): boolean {
+    return this.native.setSurfaceId(this.handle, surfaceId);
+  }
+
+  setXComponentId(xComponentId: string): boolean {
+    return this.native.setXComponentId(this.handle, xComponentId);
   }
 
   destroy(): void {
@@ -136,6 +142,11 @@ export class FFmpegNative {
   static getMediaInfo(path: string): MediaInfo | null {
     if (!FFmpegNative.init()) return null;
     return FFmpegNative.nativeModule.getMediaInfo(path);
+  }
+
+  static registerXComponentSurface(xComponentId: string, context: Object): boolean {
+    if (!FFmpegNative.init()) return false;
+    return FFmpegNative.nativeModule.registerXComponentSurface(xComponentId, context);
   }
 
   static isCodecSupported(codecName: string): boolean {

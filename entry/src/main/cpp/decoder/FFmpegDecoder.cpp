@@ -3,6 +3,31 @@
 #include <algorithm>
 #include <native_buffer/native_buffer.h>
 
+// 兼容定义：如果 SDK 头文件未提供以下常量，使用标准值
+#ifndef SET_USAGE
+#define SET_USAGE 0x1001
+#endif
+#ifndef SET_BUFFER_QUEUE_SIZE
+#define SET_BUFFER_QUEUE_SIZE 0x1008
+#endif
+#ifndef NATIVEBUFFER_USAGE_CPU_READ
+#define NATIVEBUFFER_USAGE_CPU_READ 0x00000001
+#endif
+#ifndef NATIVEBUFFER_USAGE_CPU_WRITE
+#define NATIVEBUFFER_USAGE_CPU_WRITE 0x00000002
+#endif
+#ifndef NATIVEBUFFER_USAGE_HW_RENDER
+#define NATIVEBUFFER_USAGE_HW_RENDER 0x00000010
+#endif
+// NV12 像素格式值 (GRAPHIC_PIXEL_FMT_YCBCR_420_SP = 3)
+#ifndef NV12_FORMAT_VALUE
+#define NV12_FORMAT_VALUE 3
+#endif
+// RGBA 像素格式值 (GRAPHIC_PIXEL_FMT_RGBA_8888 = 0)
+#ifndef RGBA_FORMAT_VALUE
+#define RGBA_FORMAT_VALUE 0
+#endif
+
 // HarmonyOS HiLog
 static constexpr unsigned int APP_LOG_DOMAIN = 0x0201;
 #define LOGI(...) OH_LOG_Print(LOG_APP, LOG_INFO, APP_LOG_DOMAIN, LOG_TAG, __VA_ARGS__)
@@ -60,6 +85,11 @@ void FFmpegDecoder::close() {
     if (audioThread_.joinable()) audioThread_.join();
     if (renderThread_.joinable()) renderThread_.join();
 
+    {
+        std::lock_guard<std::mutex> lock(windowMtx_);
+        releaseNativeWindowLocked();
+    }
+
     // 清空队列
     {
         std::lock_guard<std::mutex> lock(videoMtx_);
@@ -87,12 +117,22 @@ void FFmpegDecoder::close() {
         av_free(yuvBuffer_);
         yuvBuffer_ = nullptr;
     }
+    if (rgbaBuffer_) {
+        av_free(rgbaBuffer_);
+        rgbaBuffer_ = nullptr;
+    }
 
     videoStreamIdx_ = -1;
     audioStreamIdx_ = -1;
     videoClock_ = 0;
     audioClock_ = 0;
     masterClock_ = 0;
+    consecutiveRequestFails_ = 0;
+    renderWidth_ = 0;
+    renderHeight_ = 0;
+    useRgba_ = false;
+    nativeWindowConfigured_ = false;
+    firstFrameRendered_ = false;
 }
 
 // ========== 内部初始化 ==========
@@ -208,7 +248,7 @@ bool FFmpegDecoder::openCodecs() {
         }
     }
 
-    // 初始化 SWS（像素格式转换）
+    // 初始化 SWS（像素格式转换，默认输出 NV12，后续可按实际 buffer 格式切换到 RGBA）
     if (videoCodecCtx_) {
         swsCtx_ = sws_getContext(
             videoCodecCtx_->width, videoCodecCtx_->height, videoCodecCtx_->pix_fmt,
@@ -221,9 +261,11 @@ bool FFmpegDecoder::openCodecs() {
         }
 
         // 分配 YUV 缓冲
+        renderWidth_ = videoCodecCtx_->width;
+        renderHeight_ = videoCodecCtx_->height;
         yuvBufferSize_ = av_image_get_buffer_size(AV_PIX_FMT_NV12,
-            videoCodecCtx_->width, videoCodecCtx_->height, 1);
-        yuvBuffer_ = (uint8_t*)av_malloc(yuvBufferSize_);
+            renderWidth_, renderHeight_, 1);
+        yuvBuffer_ = yuvBufferSize_ > 0 ? (uint8_t*)av_malloc(yuvBufferSize_) : nullptr;
     }
 
     // 初始化 SWR（音频重采样）
@@ -261,32 +303,55 @@ bool FFmpegDecoder::openCodecs() {
 // ========== 播放控制 ==========
 
 void FFmpegDecoder::play() {
-    if (running_ && playing_) return;
+    if (running_ && !paused_ && playing_) return;
+
+    const double now = av_gettime() / 1000000.0;
+
+    if (running_ && paused_) {
+        paused_ = false;
+        playing_ = true;
+        startTime_ = now - masterClock_;
+        videoCv_.notify_all();
+        audioCv_.notify_all();
+        LOGI("Playback resumed");
+        return;
+    }
 
     running_ = true;
     playing_ = true;
     paused_ = false;
+    firstFrameRendered_ = false;
 
     if (!videoThread_.joinable() && videoCodecCtx_) {
         videoThread_ = std::thread(&FFmpegDecoder::videoDecodeLoop, this);
         renderThread_ = std::thread(&FFmpegDecoder::renderLoop, this);
     }
-    if (!audioThread_.joinable() && audioCodecCtx_) {
-        audioThread_ = std::thread(&FFmpegDecoder::audioDecodeLoop, this);
-    }
+    // Audio output is not bridged into ArkTS yet. Starting a second demux thread
+    // on the same AVFormatContext can race with videoDecodeLoop and crash the app.
+    // Keep FFmpeg fallback video-only until a single-threaded demux pipeline exists.
 
-    startTime_ = av_gettime() / 1000000.0;
+    startTime_ = now - masterClock_;
+    videoCv_.notify_all();
+    audioCv_.notify_all();
     LOGI("Playback started");
 }
 
 void FFmpegDecoder::pause() {
+    if (!running_ || paused_) {
+        return;
+    }
+
     paused_ = true;
+    playing_ = false;
     LOGI("Playback paused");
 }
 
 void FFmpegDecoder::stop() {
     running_ = false;
     playing_ = false;
+    paused_ = false;
+    videoCv_.notify_all();
+    audioCv_.notify_all();
     LOGI("Playback stopped");
 }
 
@@ -331,16 +396,191 @@ void FFmpegDecoder::setVolume(double volume) {
     volume_ = std::clamp(volume, 0.0, 1.0);
 }
 
-void FFmpegDecoder::setWindow(OHNativeWindow* window) {
-    nativeWindow_ = window;
-    if (window && videoCodecCtx_) {
-        // 设置窗口缓冲区大小
-        OH_NativeWindow_NativeWindowHandleOpt(window, SET_BUFFER_GEOMETRY,
-            videoCodecCtx_->width, videoCodecCtx_->height);
+void FFmpegDecoder::setNativeWindow(OHNativeWindow* window) {
+    std::lock_guard<std::mutex> lock(windowMtx_);
+
+    if (nativeWindow_ == window) {
+        return;
     }
+
+    surfaceId_ = 0;
+    consecutiveRequestFails_ = 0;
+    nativeWindowConfigured_ = false;
+    firstFrameRendered_ = false;
+    releaseNativeWindowLocked();
+    nativeWindow_ = window;
+    ownsNativeWindow_ = false;
 }
 
-// ========== 状态查询 ==========
+void FFmpegDecoder::setSurfaceId(uint64_t surfaceId) {
+    std::lock_guard<std::mutex> lock(windowMtx_);
+
+    if (surfaceId_ == surfaceId) {
+        return;
+    }
+
+    surfaceId_ = surfaceId;
+    consecutiveRequestFails_ = 0;
+    nativeWindowConfigured_ = false;
+    firstFrameRendered_ = false;
+    releaseNativeWindowLocked();
+}
+
+bool FFmpegDecoder::ensureNativeWindowLocked(bool forceRecreate) {
+    if (forceRecreate) {
+        releaseNativeWindowLocked();
+    }
+
+    if (nativeWindow_ != nullptr) {
+        return true;
+    }
+
+    if (surfaceId_ == 0) {
+        return false;
+    }
+
+    OHNativeWindow* window = nullptr;
+    int32_t ret = OH_NativeWindow_CreateNativeWindowFromSurfaceId(surfaceId_, &window);
+    if (ret != 0 || window == nullptr) {
+        LOGW("CreateNativeWindowFromSurfaceId failed: ret=%{public}d surfaceId=%{public}llu",
+             ret, static_cast<unsigned long long>(surfaceId_));
+        nativeWindow_ = nullptr;
+        return false;
+    }
+
+    nativeWindow_ = window;
+    ownsNativeWindow_ = true;
+    consecutiveRequestFails_ = 0;
+    nativeWindowConfigured_ = false;
+    return true;
+}
+
+void FFmpegDecoder::releaseNativeWindowLocked() {
+    if (nativeWindow_ != nullptr) {
+        if (ownsNativeWindow_) {
+            OH_NativeWindow_DestroyNativeWindow(nativeWindow_);
+        }
+        nativeWindow_ = nullptr;
+    }
+
+    ownsNativeWindow_ = false;
+    nativeWindowConfigured_ = false;
+}
+
+void FFmpegDecoder::configureNativeWindowLocked() {
+    if (videoCodecCtx_ == nullptr || !ensureNativeWindowLocked(false)) {
+        return;
+    }
+
+    OHNativeWindowBuffer* probeBuffer = nullptr;
+    int probeRet = OH_NativeWindow_NativeWindowRequestBuffer(nativeWindow_, &probeBuffer, nullptr);
+
+    if (probeRet != 0 || !probeBuffer) {
+        LOGW("Probe RequestBuffer (no config): %{public}d, trying SET_USAGE", probeRet);
+
+        uint64_t usage = NATIVEBUFFER_USAGE_CPU_READ | NATIVEBUFFER_USAGE_CPU_WRITE |
+                         NATIVEBUFFER_USAGE_HW_RENDER;
+        OH_NativeWindow_NativeWindowHandleOpt(nativeWindow_, SET_USAGE, usage);
+        OH_NativeWindow_NativeWindowHandleOpt(nativeWindow_, SET_BUFFER_QUEUE_SIZE, 8);
+
+        probeRet = OH_NativeWindow_NativeWindowRequestBuffer(nativeWindow_, &probeBuffer, nullptr);
+    }
+
+    if (probeRet != 0 || !probeBuffer) {
+        nativeWindowConfigured_ = false;
+        LOGE("Probe RequestBuffer still fails: %{public}d even with minimal config", probeRet);
+        return;
+    }
+
+    BufferHandle* handle = OH_NativeWindow_GetBufferHandleFromNative(probeBuffer);
+    if (!handle) {
+        Region emptyRegion = {nullptr, 0};
+        OH_NativeWindow_NativeWindowFlushBuffer(nativeWindow_, probeBuffer, -1, emptyRegion);
+        nativeWindowConfigured_ = false;
+        LOGE("Probe: cannot get buffer handle");
+        return;
+    }
+
+    const int actualFormat = handle->format;
+    renderWidth_ = handle->width > 0 ? handle->width : videoCodecCtx_->width;
+    renderHeight_ = handle->height > 0 ? handle->height : videoCodecCtx_->height;
+
+    AVPixelFormat probeDstFormat = AV_PIX_FMT_NV12;
+
+    if (actualFormat == NV12_FORMAT_VALUE) {
+        useRgba_ = false;
+        probeDstFormat = AV_PIX_FMT_NV12;
+
+        const int requiredSize = av_image_get_buffer_size(AV_PIX_FMT_NV12, renderWidth_, renderHeight_, 1);
+        if (requiredSize <= 0) {
+            Region emptyRegion = {nullptr, 0};
+            OH_NativeWindow_NativeWindowFlushBuffer(nativeWindow_, probeBuffer, -1, emptyRegion);
+            nativeWindowConfigured_ = false;
+            LOGE("Failed to size NV12 buffer");
+            return;
+        }
+
+        if (requiredSize != yuvBufferSize_ || yuvBuffer_ == nullptr) {
+            if (yuvBuffer_) {
+                av_free(yuvBuffer_);
+            }
+            yuvBuffer_ = (uint8_t*)av_malloc(requiredSize);
+            yuvBufferSize_ = yuvBuffer_ ? requiredSize : 0;
+        }
+
+        LOGI("Buffer format: NV12, size=%{public}dx%{public}d", renderWidth_, renderHeight_);
+    } else {
+        useRgba_ = true;
+        probeDstFormat = AV_PIX_FMT_RGBA;
+
+        const int requiredSize = av_image_get_buffer_size(AV_PIX_FMT_RGBA, renderWidth_, renderHeight_, 1);
+        if (requiredSize <= 0) {
+            Region emptyRegion = {nullptr, 0};
+            OH_NativeWindow_NativeWindowFlushBuffer(nativeWindow_, probeBuffer, -1, emptyRegion);
+            nativeWindowConfigured_ = false;
+            LOGE("Failed to size RGBA buffer");
+            return;
+        }
+
+        if (requiredSize != rgbaBufferSize_ || rgbaBuffer_ == nullptr) {
+            if (rgbaBuffer_) {
+                av_free(rgbaBuffer_);
+            }
+            rgbaBuffer_ = (uint8_t*)av_malloc(requiredSize);
+            rgbaBufferSize_ = rgbaBuffer_ ? requiredSize : 0;
+        }
+
+        LOGI("Buffer format: %{public}d (non-NV12), size=%{public}dx%{public}d, will convert to RGBA",
+             actualFormat, renderWidth_, renderHeight_);
+    }
+
+    if ((!useRgba_ && yuvBuffer_ == nullptr) || (useRgba_ && rgbaBuffer_ == nullptr)) {
+        Region emptyRegion = {nullptr, 0};
+        OH_NativeWindow_NativeWindowFlushBuffer(nativeWindow_, probeBuffer, -1, emptyRegion);
+        nativeWindowConfigured_ = false;
+        LOGE("Failed to allocate render buffer");
+        return;
+    }
+
+    if (swsCtx_) {
+        sws_freeContext(swsCtx_);
+        swsCtx_ = nullptr;
+    }
+    swsCtx_ = sws_getContext(
+        videoCodecCtx_->width, videoCodecCtx_->height, videoCodecCtx_->pix_fmt,
+        renderWidth_, renderHeight_, probeDstFormat,
+        SWS_BILINEAR, nullptr, nullptr, nullptr);
+    if (!swsCtx_) {
+        nativeWindowConfigured_ = false;
+        LOGE("Failed to create SWS context (dst format=%{public}d)", probeDstFormat);
+    } else {
+        nativeWindowConfigured_ = true;
+        consecutiveRequestFails_ = 0;
+    }
+
+    Region emptyRegion = {nullptr, 0};
+    OH_NativeWindow_NativeWindowFlushBuffer(nativeWindow_, probeBuffer, -1, emptyRegion);
+}
 
 bool FFmpegDecoder::isPlaying() const { return playing_ && !paused_; }
 bool FFmpegDecoder::isPaused() const { return paused_; }
@@ -538,6 +778,15 @@ bool FFmpegDecoder::resampleAudio(AVFrame* srcFrame, uint8_t** dstData, int* dst
 // ========== 渲染线程 ==========
 
 void FFmpegDecoder::renderLoop() {
+    // 绛夊緟涓€灏忔鏃堕棿锛岀‘淇?XComponent 鐨?SurfaceNode 瀹屽叏鍔犲叆娓叉煋鏍戯紝
+    // 涓斿悎鎴愬櫒宸茶繛鎺ュ埌 surface 鐨?buffer 闃熷垪銆?
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    {
+        std::lock_guard<std::mutex> lock(windowMtx_);
+        configureNativeWindowLocked();
+    }
+
     while (running_) {
         if (paused_) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -560,50 +809,51 @@ void FFmpegDecoder::renderLoop() {
         double pts = *(double*)frame->opaque;
         masterClock_ = pts;
 
-        // 通知进度
         if (callbacks_.onProgress) {
             callbacks_.onProgress(pts);
         }
 
-        // 同步：等待到正确的显示时间
         double delay = pts - (av_gettime() / 1000000.0 - startTime_);
         if (delay > 0.005) {
-            // 根据速度调整延迟
             delay /= speed_.load();
             std::this_thread::sleep_for(
                 std::chrono::microseconds((int64_t)(delay * 1000000)));
         }
 
-        // 转换像素格式
-        if (swsCtx_ && yuvBuffer_) {
-            uint8_t* dstData[4] = { yuvBuffer_, yuvBuffer_ + yuvBufferSize_ * 2 / 3, nullptr, nullptr };
-            int dstLinesize[4] = { videoCodecCtx_->width, videoCodecCtx_->width, 0, 0 };
+        if (swsCtx_) {
+            const int targetWidth = renderWidth_ > 0 ? renderWidth_ : frame->width;
+            const int targetHeight = renderHeight_ > 0 ? renderHeight_ : frame->height;
 
-            sws_scale(swsCtx_, frame->data, frame->linesize, 0,
-                frame->height, dstData, dstLinesize);
+            if (useRgba_ && rgbaBuffer_) {
+                uint8_t* dstData[4] = { rgbaBuffer_, nullptr, nullptr, nullptr };
+                int dstLinesize[4] = { targetWidth * 4, 0, 0, 0 };
 
-            // 渲染到 NativeWindow
-            if (nativeWindow_) {
-                VideoFrame renderFrame;
+                sws_scale(swsCtx_, frame->data, frame->linesize, 0,
+                    frame->height, dstData, dstLinesize);
+
+                VideoFrame renderFrame{};
                 memcpy(renderFrame.data, dstData, sizeof(dstData));
                 memcpy(renderFrame.linesize, dstLinesize, sizeof(dstLinesize));
-                renderFrame.width = frame->width;
-                renderFrame.height = frame->height;
+                renderFrame.width = targetWidth;
+                renderFrame.height = targetHeight;
+                renderFrame.pts = static_cast<int64_t>(pts * 1000000);
+                renderFrame.format = AV_PIX_FMT_RGBA;
+                renderToWindow(renderFrame);
+            } else if (!useRgba_ && yuvBuffer_) {
+                uint8_t* dstData[4] = { yuvBuffer_, yuvBuffer_ + (targetWidth * targetHeight), nullptr, nullptr };
+                int dstLinesize[4] = { targetWidth, targetWidth, 0, 0 };
+
+                sws_scale(swsCtx_, frame->data, frame->linesize, 0,
+                    frame->height, dstData, dstLinesize);
+
+                VideoFrame renderFrame{};
+                memcpy(renderFrame.data, dstData, sizeof(dstData));
+                memcpy(renderFrame.linesize, dstLinesize, sizeof(dstLinesize));
+                renderFrame.width = targetWidth;
+                renderFrame.height = targetHeight;
                 renderFrame.pts = static_cast<int64_t>(pts * 1000000);
                 renderFrame.format = AV_PIX_FMT_NV12;
                 renderToWindow(renderFrame);
-            }
-
-            // 通知视频帧（用于 UI 回调）
-            if (callbacks_.onVideoFrame) {
-                VideoFrame vf;
-                memcpy(vf.data, dstData, sizeof(dstData));
-                memcpy(vf.linesize, dstLinesize, sizeof(dstLinesize));
-                vf.width = frame->width;
-                vf.height = frame->height;
-                vf.pts = (int64_t)(pts * 1000000);
-                vf.format = AV_PIX_FMT_NV12;
-                callbacks_.onVideoFrame(vf);
             }
         }
 
@@ -611,7 +861,6 @@ void FFmpegDecoder::renderLoop() {
         av_frame_free(&frame);
     }
 
-    // 清空剩余帧
     std::lock_guard<std::mutex> lock(videoMtx_);
     while (!videoFrameQueue_.empty()) {
         AVFrame* f = videoFrameQueue_.front();
@@ -623,41 +872,100 @@ void FFmpegDecoder::renderLoop() {
     LOGI("Render loop ended");
 }
 
-void FFmpegDecoder::renderToWindow(const VideoFrame& frame) {
-    if (!nativeWindow_) return;
+bool FFmpegDecoder::renderToWindow(const VideoFrame& frame) {
+    std::lock_guard<std::mutex> windowLock(windowMtx_);
+    if (!ensureNativeWindowLocked(false)) return false;
+
+    if (!nativeWindowConfigured_) {
+        configureNativeWindowLocked();
+        if (!nativeWindowConfigured_) {
+            return false;
+        }
+    }
 
     OHNativeWindowBuffer* windowBuffer = nullptr;
     int ret = OH_NativeWindow_NativeWindowRequestBuffer(nativeWindow_, &windowBuffer, nullptr);
-    if (ret != 0) return;
 
-    // 获取缓冲区信息
+    if (ret != 0 || !windowBuffer) {
+        consecutiveRequestFails_++;
+        if (consecutiveRequestFails_ <= 5 || consecutiveRequestFails_ % 120 == 0) {
+            LOGW("RequestBuffer failed: %{public}d (consecutive: %{public}d)",
+                 ret, consecutiveRequestFails_);
+        }
+        if (consecutiveRequestFails_ == 1 || consecutiveRequestFails_ % 60 == 0) {
+            nativeWindowConfigured_ = false;
+            if (ensureNativeWindowLocked(true)) {
+                configureNativeWindowLocked();
+            }
+        }
+        return false;
+    }
+
+    consecutiveRequestFails_ = 0;
+
     BufferHandle* handle = OH_NativeWindow_GetBufferHandleFromNative(windowBuffer);
     if (!handle || !handle->virAddr) {
         Region emptyRegion = {nullptr, 0};
         OH_NativeWindow_NativeWindowFlushBuffer(nativeWindow_, windowBuffer, -1, emptyRegion);
-        return;
+        nativeWindowConfigured_ = false;
+        LOGW("Invalid native buffer handle");
+        return false;
     }
     void* bufferAddr = handle->virAddr;
 
-    int bufferWidth, bufferHeight;
-    OH_NativeWindow_NativeWindowHandleOpt(nativeWindow_, GET_BUFFER_GEOMETRY,
-        &bufferWidth, &bufferHeight);
+    const int stride = handle->stride > 0 ? handle->stride : frame.width;
 
-    // NV12 数据拷贝
-    uint8_t* dst = (uint8_t*)bufferAddr;
-    int ySize = frame.width * frame.height;
-    int uvSize = frame.width * frame.height / 2;
+    if (frame.format == AV_PIX_FMT_RGBA) {
+        const int bytesPerPixel = 4;
+        const int frameStride = frame.width * bytesPerPixel;
+        const int bufferHeight = handle->height > 0 ? handle->height : frame.height;
+        const int requiredSize = stride * bufferHeight * bytesPerPixel;
 
-    // Y 平面
-    for (int i = 0; i < frame.height; i++) {
-        memcpy(dst + i * frame.width, frame.data[0] + i * frame.linesize[0], frame.width);
-    }
-    // UV 平面
-    for (int i = 0; i < frame.height / 2; i++) {
-        memcpy(dst + ySize + i * frame.width,
-            frame.data[1] + i * frame.linesize[1], frame.width);
+        if (handle->size < requiredSize) {
+            LOGE("Buffer too small for RGBA: stride=%{public}d size=%{public}d needed=%{public}d",
+                 stride, handle->size, requiredSize);
+            Region emptyRegion = {nullptr, 0};
+            OH_NativeWindow_NativeWindowFlushBuffer(nativeWindow_, windowBuffer, -1, emptyRegion);
+            nativeWindowConfigured_ = false;
+            return false;
+        }
+
+        uint8_t* dst = (uint8_t*)bufferAddr;
+        for (int i = 0; i < frame.height; i++) {
+            memcpy(dst + i * stride * bytesPerPixel,
+                   frame.data[0] + i * frame.linesize[0],
+                   frameStride);
+        }
+    } else {
+        const int bufferHeight = handle->height > 0 ? handle->height : frame.height;
+        const int requiredSize = stride * bufferHeight * 3 / 2;
+
+        if (stride < frame.width || bufferHeight < frame.height || handle->size < requiredSize) {
+            LOGE("Buffer too small for NV12: stride=%{public}d height=%{public}d size=%{public}d",
+                 stride, bufferHeight, handle->size);
+            Region emptyRegion = {nullptr, 0};
+            OH_NativeWindow_NativeWindowFlushBuffer(nativeWindow_, windowBuffer, -1, emptyRegion);
+            nativeWindowConfigured_ = false;
+            return false;
+        }
+
+        uint8_t* dst = (uint8_t*)bufferAddr;
+        uint8_t* dstY = dst;
+        uint8_t* dstUV = dst + stride * bufferHeight;
+
+        for (int i = 0; i < frame.height; i++) {
+            memcpy(dstY + i * stride, frame.data[0] + i * frame.linesize[0], frame.width);
+        }
+        for (int i = 0; i < frame.height / 2; i++) {
+            memcpy(dstUV + i * stride, frame.data[1] + i * frame.linesize[1], frame.width);
+        }
     }
 
     Region region = {nullptr, 0};
     OH_NativeWindow_NativeWindowFlushBuffer(nativeWindow_, windowBuffer, -1, region);
+
+    if (!firstFrameRendered_.exchange(true)) {
+        LOGI("First video frame rendered");
+    }
+    return true;
 }

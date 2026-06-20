@@ -1,4 +1,6 @@
 import { router } from '@kit.ArkUI';
+import { window } from '@kit.ArkUI';
+import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
 import { MediaScanner } from '../service/MediaScanner';
 import { PlayHistoryService } from '../service/PlayHistoryService';
 import { VideoCard, VideoItemObserved } from '../components/VideoCard';
@@ -19,12 +21,60 @@ struct Index {
   @State selectedTab: number = 0;
   @State currentSort: SortType = SortType.DATE_MODIFIED;
   @State searchKeyword: string = '';
+  @State safeAreaTop: number = 0; // 安全区域顶部高度
 
   private scanner: MediaScanner = MediaScanner.getInstance();
   private historyService: PlayHistoryService = PlayHistoryService.getInstance();
 
   async aboutToAppear(): Promise<void> {
+    await this.initSafeArea();
+    await this.requestMediaPermission();
+  }
+
+  /**
+   * 请求读取图片视频的运行时权限
+   */
+  private async requestMediaPermission(): Promise<void> {
+    const atManager = abilityAccessCtrl.createAtManager();
+    const permissions: Array<Permissions> = [
+      'ohos.permission.READ_IMAGEVIDEO',
+      'ohos.permission.READ_MEDIA',
+      'ohos.permission.READ_WRITE_DOWNLOAD_DIRECTORY',
+      'ohos.permission.READ_WRITE_DOCUMENTS_DIRECTORY'
+    ];
+
+    try {
+      const context = getContext(this) as common.UIAbilityContext;
+      const data = await atManager.requestPermissionsFromUser(context, permissions);
+      const granted = data.authResults.some((result: number) =>
+        result === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED
+      );
+      if (granted) {
+        console.info('[Index] media read permission granted', JSON.stringify(data.authResults));
+      } else {
+        console.warn('[Index] media read permission denied by user', JSON.stringify(data.authResults));
+      }
+    } catch (e) {
+      console.error('[Index] Request permission error: ' + JSON.stringify(e));
+    }
+
+    // 无论权限是否授予，都尝试加载数据（未授权时 scanner 会 graceful fallback）
     await this.loadData();
+  }
+
+  /**
+   * 初始化安全区域
+   */
+  private async initSafeArea(): Promise<void> {
+    try {
+      const windowStage = window.getLastWindow(getContext(this));
+      const mainWindow = await windowStage;
+      const area = mainWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
+      this.safeAreaTop = px2vp(area.topRect.height);
+    } catch (e) {
+      console.error('Get safe area failed:', e);
+      this.safeAreaTop = 0;
+    }
   }
 
   async onShow(): Promise<void> {
@@ -33,15 +83,21 @@ struct Index {
   }
 
   private async loadData(): Promise<void> {
+    console.info('[Index] loadData start');
     this.isLoading = true;
     try {
+      console.info('[Index] calling scanner.scanVideos...');
       const videos = await this.scanner.scanVideos();
+      console.info('[Index] scanVideos returned, count=' + videos.length);
       this.allVideos = videos.map(v => new VideoItemObserved(v));
+      console.info('[Index] allVideos set, count=' + this.allVideos.length);
       await this.loadRecentRecords();
     } catch (e) {
-      console.error('Load data failed:', e);
+      console.error('[Index] Load data failed:', e);
+      console.error('[Index] Error details: ' + JSON.stringify(e));
     }
     this.isLoading = false;
+    console.info('[Index] loadData end, isLoading=' + this.isLoading);
   }
 
   private async loadRecentRecords(): Promise<void> {
@@ -257,6 +313,12 @@ struct Index {
 
   build() {
     Column() {
+      // 顶部安全区域占位
+      Column()
+        .width('100%')
+        .height(this.safeAreaTop)
+        .backgroundColor('#FFFFFF')
+
       // 顶部导航栏
       Row() {
         Text('视频播放器')

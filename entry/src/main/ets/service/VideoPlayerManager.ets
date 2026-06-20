@@ -1,13 +1,22 @@
-import { media } from '@kit.MediaKit';
+﻿import { media } from '@kit.MediaKit';
 import { fileIo } from '@kit.CoreFileKit';
+import { photoAccessHelper } from '@kit.MediaLibraryKit';
+import { dataSharePredicates } from '@kit.ArkData';
+import { common } from '@kit.AbilityKit';
+import { FrameNode } from '@ohos.arkui.node';
 import { PlayerState, PlaybackSpeed } from '../common/Enums';
 import { Constants } from '../common/Constants';
 import { FFmpegNative, FFmpegDecoderInstance } from '../native/FFmpegNative';
 import { PlayerError, PlayerErrorCode, createPlayerError, mapFFmpegError } from '../common/PlayerError';
 
+interface ErrorWithCode extends Error {
+  code: number;
+}
+
+type DisplaySurface = string | FrameNode;
+
 /**
- * 播放器事件回调接口
- */
+ * 鎾斁鍣ㄤ簨浠跺洖璋冩帴鍙? */
 export interface PlayerCallback {
   onStateChange?: (state: PlayerState) => void;
   onTimeUpdate?: (currentTime: number) => void;
@@ -18,18 +27,17 @@ export interface PlayerCallback {
 }
 
 /**
- * 播放引擎类型
+ * 鎾斁寮曟搸绫诲瀷
  */
 export enum PlaybackEngine {
-  AUTO = 'auto',       // 自动选择：优先 AVPlayer，不支持时切换 FFmpeg
+  AUTO = 'auto',       // 鑷姩閫夋嫨锛氫紭鍏?AVPlayer锛屼笉鏀寔鏃跺垏鎹?FFmpeg
   AVPLAYER = 'avplayer',
   FFMPEG = 'ffmpeg'
 }
 
 /**
- * 视频播放器管理类
- * 双引擎：AVPlayer（系统）+ FFmpeg（软解码）
- * AVPlayer 不支持时自动回退到 FFmpeg
+ * 瑙嗛鎾斁鍣ㄧ鐞嗙被
+ * 鍙屽紩鎿庯細AVPlayer锛堢郴缁燂級+ FFmpeg锛堣蒋瑙ｇ爜锛? * AVPlayer 涓嶆敮鎸佹椂鑷姩鍥為€€鍒?FFmpeg
  */
 export class VideoPlayerManager {
   // AVPlayer
@@ -50,8 +58,14 @@ export class VideoPlayerManager {
   private preferredEngine: PlaybackEngine = PlaybackEngine.AUTO;
   private currentFilePath: string = '';
   private currentTimePollId: number = -1;
+  private surfaceId: string = '';
+  private xComponentId: string = '';
+  private ffmpegSurface: DisplaySurface | null = null;
+  private isPrepared: boolean = false;
+  private abilityContext: common.UIAbilityContext | null = null;
+  private suppressAVPlayerErrors: boolean = false;
 
-  // ========== 公开属性 ==========
+  // ========== 鍏紑灞炴€?==========
 
   get state(): PlayerState { return this._state; }
   get currentTime(): number { return this._currentTime; }
@@ -63,12 +77,16 @@ export class VideoPlayerManager {
   get isPlaying(): boolean { return this._state === PlayerState.PLAYING; }
   get engineType(): string { return this.useFFmpeg ? 'FFmpeg' : 'AVPlayer'; }
 
-  // ========== 生命周期 ==========
+  setAbilityContext(context: common.UIAbilityContext): void {
+    this.abilityContext = context;
+  }
+
+  // ========== 鐢熷懡鍛ㄦ湡 ==========
 
   /**
-   * 初始化播放器
-   * @param callback 事件回调
-   * @param engine 引擎偏好
+   * 鍒濆鍖栨挱鏀惧櫒
+   * @param callback 浜嬩欢鍥炶皟
+   * @param engine 寮曟搸鍋忓ソ
    */
   async init(callback?: PlayerCallback, engine?: PlaybackEngine): Promise<void> {
     await this.release();
@@ -76,7 +94,7 @@ export class VideoPlayerManager {
     this.preferredEngine = engine || PlaybackEngine.AUTO;
     this._state = PlayerState.INITIALIZED;
 
-    // 如果指定 FFmpeg 或自动模式下预加载 FFmpeg
+    // 濡傛灉鎸囧畾 FFmpeg 鎴栬嚜鍔ㄦā寮忎笅棰勫姞杞?FFmpeg
     if (this.preferredEngine === PlaybackEngine.FFMPEG) {
       this.ffmpegDecoder = FFmpegNative.create();
       if (!this.ffmpegDecoder) {
@@ -87,8 +105,7 @@ export class VideoPlayerManager {
   }
 
   /**
-   * 释放播放器资源
-   */
+   * 閲婃斁鎾斁鍣ㄨ祫婧?   */
   async release(): Promise<void> {
     this.stopTimePoll();
 
@@ -106,40 +123,143 @@ export class VideoPlayerManager {
 
     this.closeFd();
     this.useFFmpeg = false;
+    this.isPrepared = false;
     this._state = PlayerState.IDLE;
     this._currentTime = 0;
     this._duration = 0;
     this._isBuffering = false;
   }
 
-  // ========== 播放源设置 ==========
+  setDisplaySurface(surface: DisplaySurface): void {
+    if (typeof surface === 'string') {
+      this.surfaceId = surface;
+      this.ffmpegSurface = surface;
+    } else {
+      this.ffmpegSurface = surface;
+    }
+
+    if (this.useFFmpeg && this.ffmpegDecoder) {
+      this.applyFFmpegSurface();
+    }
+  }
+
+  setFFmpegXComponentId(xComponentId: string): void {
+    this.xComponentId = xComponentId;
+    if (this.useFFmpeg) {
+      this.applyFFmpegSurface();
+    }
+  }
+
+  private applyFFmpegSurface(): void {
+    if (!this.ffmpegDecoder) {
+      return;
+    }
+
+    if (this.xComponentId.length > 0) {
+      const ready = this.ffmpegDecoder.setXComponentId(this.xComponentId);
+      if (ready) {
+        console.info('[PlayerManager] FFmpeg bound by native XComponent callback path');
+      } else {
+        console.warn('[PlayerManager] FFmpeg direct native window is not ready; skip legacy surfaceId fallback');
+      }
+      return;
+    }
+
+    console.warn('[PlayerManager] FFmpeg has no native XComponent id; skip legacy surfaceId fallback');
+  }
+
+  private applyAVPlayerSurface(): void {
+    if (!this.avPlayer) {
+      return;
+    }
+
+    if (this.surfaceId.length > 0) {
+      this.avPlayer.surfaceId = this.surfaceId;
+      console.info('[PlayerManager] surfaceId set:', this.surfaceId);
+    }
+  }
+
+  private applyAVPlayerDisplayOptions(): void {
+    if (!this.avPlayer) {
+      return;
+    }
+
+    try {
+      this.avPlayer.videoScaleType = media.VideoScaleType.VIDEO_SCALE_TYPE_SCALED_ASPECT;
+      console.info('[PlayerManager] videoScaleType set: SCALED_ASPECT');
+    } catch (error) {
+      const err = error as ErrorWithCode;
+      console.warn('[PlayerManager] skip videoScaleType, code:', err.code, 'msg:', err.message);
+    }
+  }
+
+  private async disposeAVPlayer(): Promise<void> {
+    if (!this.avPlayer) {
+      return;
+    }
+
+    this.removeAVPlayerListeners();
+    try {
+      await this.avPlayer.release();
+    } catch (error) {
+      const err = error as ErrorWithCode;
+      console.warn('[PlayerManager] AVPlayer release failed, code:', err.code, 'msg:', err.message);
+    }
+    this.avPlayer = null;
+    this.isPrepared = false;
+    this.closeFd();
+  }
+
+  private async waitForAVPlayerState(targetState: string, timeoutMs: number = 1500): Promise<void> {
+    const start = Date.now();
+    while (this.avPlayer && this.avPlayer.state !== targetState) {
+      if (Date.now() - start > timeoutMs) {
+        throw new Error(`Timed out waiting for AVPlayer state: ${targetState}, current=${this.avPlayer.state}`);
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    }
+  }
+
+  // ========== ????? ==========
 
   /**
-   * 设置本地文件播放源
+   * ??????????????
    */
   async setSource(filePath: string): Promise<void> {
+    console.info('[PlayerManager] setSource:', filePath);
     this.currentFilePath = filePath;
 
-    // 判断是否需要 FFmpeg
-    if (this.shouldUseFFmpeg(filePath)) {
-      await this.setupFFmpegSource(filePath);
-    } else {
-      try {
-        await this.setupAVPlayerSource(filePath);
-      } catch (e) {
-        // AVPlayer 失败时回退到 FFmpeg
-        console.warn('AVPlayer failed, falling back to FFmpeg:', e);
-        if (FFmpegNative.isAvailable()) {
-          await this.setupFFmpegSource(filePath);
-        } else {
-          throw new Error('AVPlayer failed and FFmpeg is unavailable');
-        }
+    try {
+      if (this.shouldUseFFmpeg(filePath)) {
+        console.info('[PlayerManager] using FFmpeg for:', filePath);
+        await this.setupFFmpegSource(filePath);
+        return;
       }
+
+      this.suppressAVPlayerErrors = true;
+      console.info('[PlayerManager] trying AVPlayer for:', filePath);
+      await this.setupAVPlayerSource(filePath);
+      console.info('[PlayerManager] AVPlayer setup success');
+    } catch (e) {
+      const err = e as ErrorWithCode;
+      console.error('[PlayerManager] AVPlayer setup failed, code:', err.code, 'msg:', err.message);
+      await this.disposeAVPlayer();
+      if (this.isMediaLibraryUri(filePath)) {
+        throw err;
+      }
+      console.warn('[PlayerManager] falling back to FFmpeg...');
+      if (FFmpegNative.isAvailable()) {
+        await this.setupFFmpegSource(filePath);
+      } else {
+        throw new Error('AVPlayer failed and FFmpeg is unavailable');
+      }
+    } finally {
+      this.suppressAVPlayerErrors = false;
     }
   }
 
   /**
-   * 设置网络URL播放源
+   * ??????URL?????
    */
   async setUrlSource(url: string): Promise<void> {
     this.currentFilePath = url;
@@ -148,30 +268,50 @@ export class VideoPlayerManager {
       await this.setupFFmpegSource(url);
     } else {
       try {
+        this.suppressAVPlayerErrors = true;
         await this.setupAVPlayerUrlSource(url);
       } catch (e) {
+        await this.disposeAVPlayer();
         console.warn('AVPlayer failed for URL, falling back to FFmpeg:', e);
         if (FFmpegNative.isAvailable()) {
           await this.setupFFmpegSource(url);
         } else {
           throw new Error('AVPlayer failed for URL and FFmpeg is unavailable');
         }
+      } finally {
+        this.suppressAVPlayerErrors = false;
       }
     }
   }
 
-  // ========== AVPlayer 实现 ==========
+  // ========== AVPlayer 瀹炵幇 ==========
 
   private async setupAVPlayerSource(filePath: string): Promise<void> {
+    console.info('[PlayerManager] setupAVPlayerSource:', filePath);
     if (!this.avPlayer) {
+      console.info('[PlayerManager] creating AVPlayer...');
       this.avPlayer = await media.createAVPlayer();
       this.setupAVPlayerListeners();
+      console.info('[PlayerManager] AVPlayer created');
     }
 
     this.closeFd();
-    const file = fileIo.openSync(filePath, fileIo.OpenMode.READ_ONLY);
-    this.openedFd = file.fd;
-    this.avPlayer.fdSrc = { fd: file.fd, offset: 0, length: 0 };
+    this.isPrepared = false;
+    console.info('[PlayerManager] opening file...');
+    const fd = this.isMediaLibraryUri(filePath)
+      ? await this.openMediaLibraryFd(filePath)
+      : fileIo.openSync(filePath, fileIo.OpenMode.READ_ONLY).fd;
+    this.openedFd = fd;
+    console.info('[PlayerManager] file opened, fd:', fd);
+    this.avPlayer.fdSrc = { fd: fd, offset: 0, length: 0 };
+    console.info('[PlayerManager] fdSrc set');
+    await this.waitForAVPlayerState('initialized');
+    this.applyAVPlayerSurface();
+    await this.avPlayer.prepare();
+    await this.waitForAVPlayerState('prepared');
+    this.applyAVPlayerDisplayOptions();
+    this.isPrepared = true;
+    console.info('[PlayerManager] AVPlayer prepared');
     this.useFFmpeg = false;
   }
 
@@ -182,7 +322,14 @@ export class VideoPlayerManager {
     }
 
     this.closeFd();
+    this.isPrepared = false;
     this.avPlayer.url = url;
+    await this.waitForAVPlayerState('initialized');
+    this.applyAVPlayerSurface();
+    await this.avPlayer.prepare();
+    await this.waitForAVPlayerState('prepared');
+    this.applyAVPlayerDisplayOptions();
+    this.isPrepared = true;
     this.useFFmpeg = false;
   }
 
@@ -214,11 +361,21 @@ export class VideoPlayerManager {
     });
 
     this.avPlayer.on('error', (err) => {
-      console.error(`AVPlayer error: ${err.code} - ${err.message}`);
+      console.error(`[PlayerManager] AVPlayer error!`);
+      console.error(`[PlayerManager] AVPlayer error code: ${err.code}`);
+      console.error(`[PlayerManager] AVPlayer error message: ${err.message}`);
+      console.error(`[PlayerManager] AVPlayer error - currentFilePath: ${this.currentFilePath}`);
+      console.error(`[PlayerManager] AVPlayer error - state: ${this._state}`);
+      if (this.suppressAVPlayerErrors) {
+        console.warn('[PlayerManager] AVPlayer error suppressed during source probing');
+        return;
+      }
       this._state = PlayerState.ERROR;
-      // 将 AVPlayer 错误码映射到统一错误码
+      this.isPrepared = false;
+      // Map AVPlayer errors into the shared PlayerErrorCode space.
       const errorCode = this.mapAVPlayerErrorCode(err.code, err.message);
-      const playerError = createPlayerError(errorCode, `AVPlayer 错误: [${err.code}] ${err.message}`);
+      const playerError = createPlayerError(errorCode,
+        `AVPlayer error [code=${err.code}]: ${err.message}\nFile: ${this.currentFilePath}`);
       this.callback?.onError?.(playerError);
     });
   }
@@ -232,7 +389,7 @@ export class VideoPlayerManager {
     this.avPlayer.off('error');
   }
 
-  // ========== FFmpeg 实现 ==========
+  // ========== FFmpeg 瀹炵幇 ==========
 
   private async setupFFmpegSource(path: string): Promise<void> {
     if (!this.ffmpegDecoder) {
@@ -243,19 +400,21 @@ export class VideoPlayerManager {
     }
 
     this.useFFmpeg = true;
+    this.isPrepared = false;
+    this.applyFFmpegSurface();
     const success = this.ffmpegDecoder.open(path);
     if (!success) {
       throw new Error('FFmpeg failed to open: ' + path);
     }
 
-    this._duration = this.ffmpegDecoder.getDuration() * 1000; // 转毫秒
-    this._state = PlayerState.PREPARED;
+    this._duration = this.ffmpegDecoder.getDuration() * 1000; // 杞绉?    this._state = PlayerState.PREPARED;
+    this.isPrepared = true;
     this.callback?.onStateChange?.(PlayerState.PREPARED);
     this.callback?.onDurationUpdate?.(this._duration);
   }
 
   /**
-   * 启动 FFmpeg 时间轮询
+   * 鍚姩 FFmpeg 鏃堕棿杞
    */
   private startTimePoll(): void {
     this.stopTimePoll();
@@ -275,7 +434,7 @@ export class VideoPlayerManager {
     }
   }
 
-  // ========== 播放控制 ==========
+  // ========== 鎾斁鎺у埗 ==========
 
   async play(): Promise<void> {
     if (this.useFFmpeg && this.ffmpegDecoder) {
@@ -283,8 +442,13 @@ export class VideoPlayerManager {
       this._state = PlayerState.PLAYING;
       this.callback?.onStateChange?.(PlayerState.PLAYING);
       this.startTimePoll();
-    } else {
-      await this.avPlayer?.play();
+    } else if (this.avPlayer) {
+      if (!this.isPrepared && this.avPlayer.state === 'initialized') {
+        await this.avPlayer.prepare();
+        await this.waitForAVPlayerState('prepared');
+        this.isPrepared = true;
+      }
+      await this.avPlayer.play();
     }
   }
 
@@ -305,6 +469,7 @@ export class VideoPlayerManager {
     } else {
       await this.avPlayer?.stop();
     }
+    this.isPrepared = false;
   }
 
   async togglePlayPause(): Promise<void> {
@@ -318,8 +483,8 @@ export class VideoPlayerManager {
   async seekTo(timeMs: number): Promise<void> {
     const clampedTime = Math.max(0, Math.min(timeMs, this._duration));
     if (this.useFFmpeg && this.ffmpegDecoder) {
-      this.ffmpegDecoder.seek(clampedTime / 1000); // 毫秒 -> 秒
-    } else if (this.avPlayer) {
+      this.ffmpegDecoder.seek(clampedTime / 1000);
+    } else if (this.avPlayer !== null) {
       this.avPlayer.seek(clampedTime);
     }
   }
@@ -379,45 +544,52 @@ export class VideoPlayerManager {
   }
 
   /**
-   * 设置渲染表面（FFmpeg 模式下需要）
+   * 璁剧疆娓叉煋琛ㄩ潰锛團Fmpeg 妯″紡涓嬮渶瑕侊級
    */
-  setSurface(surfaceId: string): void {
-    if (this.useFFmpeg && this.ffmpegDecoder) {
-      this.ffmpegDecoder.setSurface(surfaceId);
-    }
+  setSurface(surface: DisplaySurface): void {
+    this.setDisplaySurface(surface);
   }
 
   /**
-   * 获取视频编码信息
-   */
-  getCodecInfo(): string {
-    if (this.useFFmpeg && this.ffmpegDecoder) {
-      const vCodec = this.ffmpegDecoder.getVideoCodec();
-      const aCodec = this.ffmpegDecoder.getAudioCodec();
-      return `V: ${vCodec}, A: ${aCodec}`;
-    }
-    return 'System AVPlayer';
-  }
-
-  // ========== 辅助方法 ==========
-
-  /**
-   * 判断是否应该使用 FFmpeg
-   * 检查文件扩展名，对于 AVPlayer 可能不支持的格式优先使用 FFmpeg
+   * ???????? FFmpeg
    */
   private shouldUseFFmpeg(path: string): boolean {
     if (this.preferredEngine === PlaybackEngine.FFMPEG) return true;
     if (this.preferredEngine === PlaybackEngine.AVPLAYER) return false;
+    if (this.isMediaLibraryUri(path)) return false;
 
-    // 自动模式：对 AVPlayer 不擅长的格式使用 FFmpeg
-    const ffmpegFormats = [
-      '.mkv', '.avi', '.flv', '.wmv', '.webm', '.ts',
-      '.mpg', '.mpeg', '.vob', '.m2ts', '.rmvb', '.rm',
-      '.3gp', '.asf', '.ogv'
-    ];
+    // AUTO ???????? AVPlayer??????? FFmpeg ???????
+    return false;
+  }
 
-    const lowerPath = path.toLowerCase();
-    return ffmpegFormats.some(ext => lowerPath.endsWith(ext));
+  private isMediaLibraryUri(path: string): boolean {
+    return path.startsWith('file://media/');
+  }
+
+  private async openMediaLibraryFd(uri: string): Promise<number> {
+    if (!this.abilityContext) {
+      throw new Error('Media library context is not ready');
+    }
+    const helper = photoAccessHelper.getPhotoAccessHelper(this.abilityContext);
+    const predicates = new dataSharePredicates.DataSharePredicates();
+    predicates.equalTo(photoAccessHelper.PhotoKeys.URI.toString(), uri);
+
+    const fetchResult = await helper.getAssets({
+      fetchColumns: [photoAccessHelper.PhotoKeys.URI.toString()],
+      predicates: predicates
+    });
+
+    try {
+      const assets = await fetchResult.getAllObjects();
+      if (assets.length === 0) {
+        throw new Error(`Media asset not found for uri: ${uri}`);
+      }
+      const fd = await assets[0].getReadOnlyFd();
+      console.info('[PlayerManager] media library fd opened:', fd);
+      return fd;
+    } finally {
+      fetchResult.close();
+    }
   }
 
   private closeFd(): void {
@@ -472,32 +644,40 @@ export class VideoPlayerManager {
   }
 
   /**
-   * 将 AVPlayer 错误码映射到统一的 PlayerErrorCode
+   * 灏?AVPlayer 閿欒鐮佹槧灏勫埌缁熶竴鐨?PlayerErrorCode
    */
   private mapAVPlayerErrorCode(avCode: number, avMsg: string): PlayerErrorCode {
-    // AVPlayer 常见错误码
-    // 5400101: 文件不存在或无法打开
-    // 5400102: 不支持的格式
-    // 5400103: 解码错误
-    // 5400104: 网络错误
-    // 5400105: 未知错误
+    // AVPlayer 甯歌閿欒鐮?    // 5400101: 鏂囦欢涓嶅瓨鍦ㄦ垨鏃犳硶鎵撳紑
+    // 5400102: 涓嶆敮鎸佺殑鏍煎紡
+    // 5400103: 瑙ｇ爜閿欒
+    // 5400104: 缃戠粶閿欒
+    // 5400105: 鏈煡閿欒
     const msg = avMsg.toLowerCase();
 
     switch (avCode) {
+      case 13900001:
+      case 201:
+        return PlayerErrorCode.PERMISSION_DENIED;
       case 5400101:
-        if (msg.includes('permission') || msg.includes('权限')) {
+        if (msg.includes('permission') || msg.includes('鏉冮檺')) {
           return PlayerErrorCode.PERMISSION_DENIED;
         }
-        if (msg.includes('not found') || msg.includes('找不到')) {
+        if (msg.includes('not found')) {
           return PlayerErrorCode.FILE_NOT_FOUND;
         }
         return PlayerErrorCode.FILE_READ_ERROR;
 
       case 5400102:
-        if (msg.includes('codec') || msg.includes('解码器')) {
+        if (msg.includes('surfaceid') || msg.includes('surface')) {
+          return PlayerErrorCode.RENDERER_SURFACE_ERROR;
+        }
+        if (msg.includes('not permit') || msg.includes('not allowed') || msg.includes('state')) {
+          return PlayerErrorCode.FILE_READ_ERROR;
+        }
+        if (msg.includes('codec')) {
           return PlayerErrorCode.DECODER_NOT_FOUND;
         }
-        if (msg.includes('format') || msg.includes('格式')) {
+        if (msg.includes('format') || msg.includes('鏍煎紡')) {
           return PlayerErrorCode.FILE_FORMAT_UNKNOWN;
         }
         return PlayerErrorCode.UNSUPPORTED_CODEC;
@@ -506,16 +686,16 @@ export class VideoPlayerManager {
         return PlayerErrorCode.DECODE_ERROR;
 
       case 5400104:
-        if (msg.includes('timeout') || msg.includes('超时')) {
+        if (msg.includes('timeout') || msg.includes('瓒呮椂')) {
           return PlayerErrorCode.NETWORK_TIMEOUT;
         }
-        if (msg.includes('dns') || msg.includes('域名')) {
+        if (msg.includes('dns') || msg.includes('鍩熷悕')) {
           return PlayerErrorCode.NETWORK_DNS_ERROR;
         }
         return PlayerErrorCode.NETWORK_UNAVAILABLE;
 
       default:
-        // 尝试从消息内容判断
+        // Fallback to message heuristics when the numeric code is unknown.
         if (msg.includes('codec') || msg.includes('format')) {
           return PlayerErrorCode.UNSUPPORTED_CODEC;
         }
@@ -529,3 +709,9 @@ export class VideoPlayerManager {
     }
   }
 }
+
+
+
+
+
+

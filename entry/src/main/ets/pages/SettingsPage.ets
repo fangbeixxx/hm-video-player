@@ -1,4 +1,5 @@
 import { router } from '@kit.ArkUI';
+import { window } from '@kit.ArkUI';
 import { PlayHistoryService } from '../service/PlayHistoryService';
 import { PlaybackSpeed, ScreenOrientation } from '../common/Enums';
 
@@ -13,15 +14,29 @@ struct SettingsPage {
   @State showSubtitle: boolean = true;
   @State wifiOnly: boolean = true;
   @State historyCount: number = 0;
+  @State safeAreaTop: number = 0;
 
   private historyService: PlayHistoryService = PlayHistoryService.getInstance();
 
   async aboutToAppear(): Promise<void> {
+    await this.initSafeArea();
     try {
       const history = await this.historyService.getHistory();
       this.historyCount = history.length;
     } catch (error) {
       console.error('Load settings failed.');
+    }
+  }
+
+  private async initSafeArea(): Promise<void> {
+    try {
+      const windowStage = window.getLastWindow(getContext(this));
+      const mainWindow = await windowStage;
+      const area = mainWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
+      this.safeAreaTop = px2vp(area.topRect.height);
+    } catch (e) {
+      console.error('Get safe area failed:', e);
+      this.safeAreaTop = 0;
     }
   }
 
@@ -32,6 +47,12 @@ struct SettingsPage {
 
   build() {
     Column() {
+      // 顶部安全区域占位
+      Column()
+        .width('100%')
+        .height(this.safeAreaTop)
+        .backgroundColor('#FFFFFF')
+
       Row() {
         Image($r('app.media.ic_arrow_back'))
           .width(24)

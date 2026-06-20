@@ -5,6 +5,7 @@
 #include <memory>
 #include <thread>
 #include <atomic>
+#include <cstdint>
 #include <mutex>
 #include <queue>
 #include <condition_variable>
@@ -130,7 +131,8 @@ public:
      * 设置渲染窗口
      * @param window NativeWindow 指针
      */
-    void setWindow(OHNativeWindow* window);
+    void setNativeWindow(OHNativeWindow* window);
+    void setSurfaceId(uint64_t surfaceId);
 
     /**
      * 是否正在播放
@@ -173,6 +175,10 @@ public:
     std::string getAudioCodecName() const;
 
 private:
+    bool ensureNativeWindowLocked(bool forceRecreate);
+    void releaseNativeWindowLocked();
+    void configureNativeWindowLocked();
+
     // 打开输入流
     bool openInput(const std::string& path);
 
@@ -198,7 +204,7 @@ private:
     bool decodeAudioPacket(AVPacket* packet, AVFrame* frame);
 
     // 渲染视频帧到 NativeWindow
-    void renderToWindow(const VideoFrame& frame);
+    bool renderToWindow(const VideoFrame& frame);
 
     // 转换像素格式到 NV21/NV12（Android/HarmonyOS 常用）
     bool convertFrame(AVFrame* srcFrame, uint8_t* dstData[4], int dstLinesize[4]);
@@ -252,9 +258,20 @@ private:
     double startTime_ = 0.0;
 
     // ========== 渲染 ==========
+    std::mutex windowMtx_;
+    uint64_t surfaceId_ = 0;
     OHNativeWindow* nativeWindow_ = nullptr;
     uint8_t* yuvBuffer_ = nullptr;
     int yuvBufferSize_ = 0;
+    uint8_t* rgbaBuffer_ = nullptr;
+    int rgbaBufferSize_ = 0;
+    int renderWidth_ = 0;
+    int renderHeight_ = 0;
+    bool useRgba_ = false;
+    bool nativeWindowConfigured_ = false;
+    bool ownsNativeWindow_ = false;
+    int consecutiveRequestFails_ = 0;
+    std::atomic<bool> firstFrameRendered_{false};
 
     // ========== 音频缓冲 ==========
     uint8_t* audioBuffer_ = nullptr;

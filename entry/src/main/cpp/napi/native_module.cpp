@@ -14,7 +14,7 @@
  *   nativeModule.open(handle, '/data/storage/el2/base/videos/test.mkv');
  *
  *   // 设置渲染面
- *   nativeModule.setSurface(handle, surfaceId);
+ *   nativeModule.setSurfaceId(handle, surfaceId);
  *
  *   // 播放
  *   nativeModule.play(handle);
@@ -67,7 +67,9 @@ static napi_value Init(napi_env env, napi_value exports) {
         {"getAudioCodec",   nullptr, GetAudioCodec,   nullptr, nullptr, nullptr, napi_default, nullptr},
 
         // 渲染
-        {"setSurface",      nullptr, SetSurface,      nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"setSurfaceId",    nullptr, SetSurfaceId,    nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"setXComponentId", nullptr, SetXComponentId, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"registerXComponentSurface", nullptr, RegisterXComponentSurface, nullptr, nullptr, nullptr, napi_default, nullptr},
 
         // 工具
         {"getMediaInfo",    nullptr, GetMediaInfo,    nullptr, nullptr, nullptr, napi_default, nullptr},

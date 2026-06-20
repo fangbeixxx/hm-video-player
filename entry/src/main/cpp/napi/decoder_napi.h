@@ -75,7 +75,9 @@ napi_value GetAudioCodec(napi_env env, napi_callback_info info);
  * @param handle decoderHandle
  * @param surfaceId string
  */
-napi_value SetSurface(napi_env env, napi_callback_info info);
+napi_value SetSurfaceId(napi_env env, napi_callback_info info);
+napi_value SetXComponentId(napi_env env, napi_callback_info info);
+napi_value RegisterXComponentSurface(napi_env env, napi_callback_info info);
 
 // ========== 工具函数 ==========
 

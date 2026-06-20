@@ -1,4 +1,5 @@
 import { router } from '@kit.ArkUI';
+import { window } from '@kit.ArkUI';
 import { MediaScanner } from '../service/MediaScanner';
 import { VideoCard, VideoItemObserved } from '../components/VideoCard';
 import { VideoItem } from '../model/VideoItem';
@@ -13,8 +14,25 @@ struct SearchPage {
   @State searchResults: VideoItemObserved[] = [];
   @State isSearching: boolean = false;
   @State hasSearched: boolean = false;
+  @State safeAreaTop: number = 0;
 
   private scanner: MediaScanner = MediaScanner.getInstance();
+
+  async aboutToAppear(): Promise<void> {
+    await this.initSafeArea();
+  }
+
+  private async initSafeArea(): Promise<void> {
+    try {
+      const windowStage = window.getLastWindow(getContext(this));
+      const mainWindow = await windowStage;
+      const area = mainWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
+      this.safeAreaTop = px2vp(area.topRect.height);
+    } catch (e) {
+      console.error('Get safe area failed:', e);
+      this.safeAreaTop = 0;
+    }
+  }
 
   /**
    * 执行搜索
@@ -49,6 +67,12 @@ struct SearchPage {
 
   build() {
     Column() {
+      // 顶部安全区域占位
+      Column()
+        .width('100%')
+        .height(this.safeAreaTop)
+        .backgroundColor('#FFFFFF')
+
       // 搜索栏
       Row({ space: 8 }) {
         Image($r('app.media.ic_arrow_back'))
