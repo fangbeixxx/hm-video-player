@@ -70,26 +70,6 @@ struct PlayerPage {
         .height(this.safeAreaTop)
         .backgroundColor('#000000')
 
-      Row() {
-        Image($r('app.media.ic_arrow_back'))
-          .width(24)
-          .height(24)
-          .fillColor('#FFFFFF')
-          .onClick(() => router.back())
-
-        Text(this.videoTitle)
-          .fontSize(16)
-          .fontColor('#FFFFFF')
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .margin({ left: 12 })
-          .layoutWeight(1)
-      }
-      .width('100%')
-      .height(48)
-      .padding({ left: 16, right: 16 })
-      .backgroundColor('#000000')
-
       if (this.playerReady) {
         VideoPlayerView({
           videoPath: this.videoPath,

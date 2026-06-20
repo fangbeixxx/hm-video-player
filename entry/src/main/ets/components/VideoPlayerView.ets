@@ -772,6 +772,7 @@ export struct VideoPlayerView {
       }
 
       ControlPanel({
+        title: this.videoTitle,
         currentTime: this.currentTime,
         duration: this.duration,
         isPlaying: this.isPlaying,
@@ -822,6 +823,7 @@ export struct VideoPlayerView {
         },
         onPrevious: () => this.onPrevious(),
         onNext: () => this.onNext(),
+        onBack: () => this.onBack(),
         onFullscreen: () => {
           this.isFullscreen = !this.isFullscreen;
         }
@@ -950,6 +952,7 @@ export struct VideoPlayerView {
     .width('100%')
   }
 }
+
 
 
 

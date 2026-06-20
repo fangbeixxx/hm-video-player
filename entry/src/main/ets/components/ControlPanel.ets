@@ -1,9 +1,6 @@
-import { TimeUtils } from '../utils/TimeUtils';
+﻿import { TimeUtils } from '../utils/TimeUtils';
 import { PlayerState, PlaybackSpeed } from '../common/Enums';
 
-/**
- * 视频控制面板组件
- */
 @Component
 export struct ControlPanel {
   @Prop currentTime: number;
@@ -13,6 +10,7 @@ export struct ControlPanel {
   @Prop currentSpeed: PlaybackSpeed;
   @Prop isMuted: boolean;
   @Prop isBuffering: boolean;
+  @Prop title: string = '';
 
   onPlayPause: () => void = () => {};
   onSeek: (timeMs: number) => void = () => {};
@@ -23,27 +21,67 @@ export struct ControlPanel {
   onToggleMute: () => void = () => {};
   onPrevious: () => void = () => {};
   onNext: () => void = () => {};
+  onBack: () => void = () => {};
 
   @State showControls: boolean = true;
   @State isDragging: boolean = false;
   @State dragProgress: number = 0;
-  @State controlTimer: number = -1;
 
   private timerId: number = -1;
+  private autoHidePollId: number = -1;
+  private lastAutoHideSignature: string = '';
+
+  aboutToAppear(): void {
+    this.syncAutoHideState();
+    this.startAutoHidePolling();
+  }
 
   aboutToDisappear(): void {
     this.clearTimer();
+    this.stopAutoHidePolling();
   }
 
-  /**
-   * 显示控制栏并设置自动隐藏
-   */
+  private startAutoHidePolling(): void {
+    this.stopAutoHidePolling();
+    this.lastAutoHideSignature = this.buildAutoHideSignature();
+    this.autoHidePollId = setInterval(() => {
+      const nextSignature = this.buildAutoHideSignature();
+      if (nextSignature !== this.lastAutoHideSignature) {
+        this.lastAutoHideSignature = nextSignature;
+        this.syncAutoHideState();
+      }
+    }, 250);
+  }
+
+  private stopAutoHidePolling(): void {
+    if (this.autoHidePollId >= 0) {
+      clearInterval(this.autoHidePollId);
+      this.autoHidePollId = -1;
+    }
+  }
+
+  private buildAutoHideSignature(): string {
+    return `${this.isPlaying}|${this.playerState}|${this.isBuffering}|${this.isDragging}`;
+  }
+
+  private syncAutoHideState(): void {
+    if (this.isDragging || this.isBuffering || this.playerState === PlayerState.PAUSED || !this.isPlaying) {
+      this.showControls = true;
+      this.clearTimer();
+      return;
+    }
+    this.showAndAutoHide();
+  }
+
   private showAndAutoHide(): void {
     this.showControls = true;
     this.clearTimer();
+    if (!this.isPlaying || this.isBuffering || this.playerState === PlayerState.PAUSED) {
+      return;
+    }
     this.timerId = setTimeout(() => {
       this.showControls = false;
-    }, 5000);
+    }, 3200);
   }
 
   private clearTimer(): void {
@@ -55,7 +93,6 @@ export struct ControlPanel {
 
   build() {
     Stack({ alignContent: Alignment.Bottom }) {
-      // 缓冲指示器
       if (this.isBuffering) {
         Column() {
           LoadingProgress()
@@ -68,30 +105,41 @@ export struct ControlPanel {
         .justifyContent(FlexAlign.Center)
       }
 
-      // 控制层
       if (this.showControls) {
         Column() {
-          // 顶部栏
-          Row() {
-            Blank()
+          Row({ space: 12 }) {
+            Image($r('app.media.ic_arrow_back'))
+              .width(22)
+              .height(22)
+              .fillColor('#FFFFFF')
+              .padding(8)
+              .backgroundColor('rgba(255,255,255,0.08)')
+              .borderRadius(20)
+              .onClick(() => this.onBack())
+
+            Text(this.title)
+              .fontSize(16)
+              .fontColor('#FFFFFF')
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1)
+
             Button({ type: ButtonType.Circle, stateEffect: true }) {
               Image($r('app.media.ic_more'))
-                .width(24)
-                .height(24)
+                .width(20)
+                .height(20)
                 .fillColor('#FFFFFF')
             }
-            .width(40)
-            .height(40)
-            .backgroundColor('transparent')
+            .width(36)
+            .height(36)
+            .backgroundColor('rgba(255,255,255,0.08)')
           }
           .width('100%')
-          .padding({ left: 16, right: 16, top: 8 })
+          .padding({ left: 16, right: 16, top: 12 })
 
           Blank()
 
-          // 底部控制栏
-          Column({ space: 8 }) {
-            // 进度条
+          Column({ space: 10 }) {
             Row({ space: 8 }) {
               Text(TimeUtils.formatTime(this.isDragging ? this.dragProgress : this.currentTime))
                 .fontSize(12)
@@ -122,7 +170,7 @@ export struct ControlPanel {
                   } else if (event.type === TouchType.Up) {
                     this.isDragging = false;
                     this.onSeek(this.dragProgress);
-                    this.showAndAutoHide();
+                    this.syncAutoHideState();
                   }
                 })
 
@@ -134,86 +182,103 @@ export struct ControlPanel {
             .width('100%')
             .padding({ left: 12, right: 12 })
 
-            // 按钮栏
             Row() {
-              // 播放速度
               Text(`${this.currentSpeed}x`)
                 .fontSize(14)
                 .fontColor('#FFFFFF')
                 .padding({ left: 12, right: 12, top: 4, bottom: 4 })
                 .borderRadius(4)
                 .backgroundColor('rgba(255,255,255,0.15)')
-                .onClick(() => this.onSpeedChange())
+                .onClick(() => {
+                  this.onSpeedChange();
+                  this.showAndAutoHide();
+                })
 
               Blank()
 
-              // 上一集
               Image($r('app.media.ic_skip_previous'))
                 .width(32)
                 .height(32)
                 .fillColor('#FFFFFF')
-                .onClick(() => this.onPrevious())
+                .onClick(() => {
+                  this.onPrevious();
+                  this.showAndAutoHide();
+                })
 
-              // 快退
               Image($r('app.media.ic_replay_10'))
                 .width(36)
                 .height(36)
                 .fillColor('#FFFFFF')
                 .margin({ left: 16, right: 16 })
-                .onClick(() => this.onSeekBackward())
+                .onClick(() => {
+                  this.onSeekBackward();
+                  this.showAndAutoHide();
+                })
 
-              // 播放/暂停
               Image(this.isPlaying ? $r('app.media.ic_pause') : $r('app.media.ic_play'))
                 .width(52)
                 .height(52)
                 .fillColor('#FFFFFF')
-                .onClick(() => this.onPlayPause())
+                .onClick(() => {
+                  this.onPlayPause();
+                  this.syncAutoHideState();
+                })
 
-              // 快进
               Image($r('app.media.ic_forward_10'))
                 .width(36)
                 .height(36)
                 .fillColor('#FFFFFF')
                 .margin({ left: 16, right: 16 })
-                .onClick(() => this.onSeekForward())
+                .onClick(() => {
+                  this.onSeekForward();
+                  this.showAndAutoHide();
+                })
 
-              // 下一集
               Image($r('app.media.ic_skip_next'))
                 .width(32)
                 .height(32)
                 .fillColor('#FFFFFF')
-                .onClick(() => this.onNext())
+                .onClick(() => {
+                  this.onNext();
+                  this.showAndAutoHide();
+                })
 
               Blank()
 
-              // 静音
               Image(this.isMuted ? $r('app.media.ic_volume_off') : $r('app.media.ic_volume_on'))
                 .width(24)
                 .height(24)
                 .fillColor('#FFFFFF')
-                .onClick(() => this.onToggleMute())
+                .onClick(() => {
+                  this.onToggleMute();
+                  this.showAndAutoHide();
+                })
 
-              // 全屏
               Image($r('app.media.ic_fullscreen'))
                 .width(24)
                 .height(24)
                 .fillColor('#FFFFFF')
                 .margin({ left: 16 })
-                .onClick(() => this.onFullscreen())
+                .onClick(() => {
+                  this.onFullscreen();
+                  this.showAndAutoHide();
+                })
             }
             .width('100%')
-            .padding({ left: 16, right: 16, bottom: 12 })
+            .padding({ left: 16, right: 16, bottom: 14 })
           }
         }
         .width('100%')
         .height('100%')
-        .backgroundColor('rgba(0,0,0,0.35)')
+        .backgroundColor('rgba(0,0,0,0.28)')
       }
     }
     .width('100%')
     .height('100%')
     .onClick(() => {
-      if (this.isDragging) return;
+      if (this.isDragging) {
+        return;
+      }
       if (this.showControls) {
         this.showControls = false;
         this.clearTimer();
