@@ -1,0 +1,6 @@
+# 所有文本文件使用 LF
+* text=auto
+
+# 或者特定文件类型
+*.ets text eol=lf
+*.ts text eol=lf
