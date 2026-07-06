@@ -8,6 +8,7 @@ interface PlayerRouteParams {
   videoPath?: string;
   videoTitle?: string;
   seekTo?: number;
+  sourceType?: string; // 'local' | 'online'
 }
 
 @Entry

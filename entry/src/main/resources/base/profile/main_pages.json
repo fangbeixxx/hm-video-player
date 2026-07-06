@@ -3,6 +3,7 @@
     "pages/Index",
     "pages/PlayerPage",
     "pages/SearchPage",
-    "pages/SettingsPage"
+    "pages/SettingsPage",
+    "pages/OnlinePage"
   ]
 }

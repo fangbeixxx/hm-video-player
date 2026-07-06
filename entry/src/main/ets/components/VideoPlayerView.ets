@@ -1,4 +1,6 @@
 ﻿import { fileIo } from '@kit.CoreFileKit';
+import { window } from '@kit.ArkUI';
+import picker from '@ohos.file.picker';
 import util from '@ohos.util';
 import { VideoPlayerManager } from '../service/VideoPlayerManager';
 import { ControlPanel } from './ControlPanel';
@@ -73,6 +75,9 @@ export struct VideoPlayerView {
   @State videoAspectRatio: number = 16 / 9;
   @State subtitleText: string = '';
   @State subtitlesEnabled: boolean = true;
+  @State subtitleDelayMs: number = 0;
+  @State screenBrightness: number = 0.5;
+  @State playbackVolume: number = 1.0;
 
   private saveTimerId: number = -1;
   private progressTimerId: number = -1;
@@ -445,6 +450,13 @@ export struct VideoPlayerView {
 
   private async loadExternalSubtitles(): Promise<void> {
     this.externalSubtitleCues = [];
+
+    // Skip file-based subtitle scanning for URLs
+    if (this.videoPath.startsWith('http://') || this.videoPath.startsWith('https://')) {
+      console.info('[VideoPlayerView] online video, skipping local subtitle scan');
+      return;
+    }
+
     for (const extension of SUBTITLE_EXTENSIONS) {
       const subtitlePath = this.getSubtitlePathByExtension(extension);
       try {
@@ -740,13 +752,69 @@ export struct VideoPlayerView {
     if (!this.hasExternalSubtitles()) {
       return;
     }
+    const adjustedTime = this.currentTime - this.subtitleDelayMs;
     const currentCue = this.externalSubtitleCues.find((cue: SubtitleCue) =>
-      this.currentTime >= cue.startMs && this.currentTime <= cue.endMs);
+      adjustedTime >= cue.startMs && adjustedTime <= cue.endMs);
     const nextSubtitleText = currentCue ? currentCue.text : '';
     if (nextSubtitleText !== this.subtitleText) {
-      console.info('[VideoPlayerView] subtitle external currentTime=' + this.currentTime + ' text=' + JSON.stringify(nextSubtitleText));
+      console.info('[VideoPlayerView] subtitle external currentTime=' + this.currentTime + ' delay=' + this.subtitleDelayMs + ' text=' + JSON.stringify(nextSubtitleText));
     }
     this.subtitleText = nextSubtitleText;
+  }
+
+  /**
+   * 手动选择外挂字幕文件
+   */
+  async selectSubtitleFile(): Promise<void> {
+    try {
+      const documentPicker = new picker.DocumentViewPicker();
+      const result = await documentPicker.select();
+      if (result.length === 0) {
+        return;
+      }
+      const subtitlePath = result[0];
+      const text = this.readSubtitleSourceText(subtitlePath);
+      const extension = subtitlePath.substring(subtitlePath.lastIndexOf('.')).toLowerCase();
+      const cues = this.parseSubtitleByExtension(extension, text);
+      if (cues.length > 0) {
+        this.externalSubtitleCues = cues;
+        this.subtitleDelayMs = 0;
+        console.info('[VideoPlayerView] manual subtitle loaded: ' + subtitlePath + ' cues=' + cues.length);
+      } else {
+        console.warn('[VideoPlayerView] no cues found in selected subtitle file');
+      }
+    } catch (error) {
+      console.error('[VideoPlayerView] select subtitle failed: ' + JSON.stringify(error));
+    }
+  }
+
+  /**
+   * 调整字幕延迟
+   */
+  setSubtitleDelay(delayMs: number): void {
+    this.subtitleDelayMs = delayMs;
+    console.info('[VideoPlayerView] subtitle delay set to ' + delayMs + 'ms');
+  }
+
+  /**
+   * 设置屏幕亮度
+   */
+  private setScreenBrightness(brightness: number): void {
+    this.screenBrightness = brightness;
+    window.getLastWindow(getContext(this)).then((win) => {
+      win.setWindowBrightness(brightness);
+    }).catch((err: Error) => {
+      console.warn('[VideoPlayerView] set brightness failed: ' + err.message);
+    });
+  }
+
+  /**
+   * 设置播放音量
+   */
+  private setPlaybackVolume(vol: number): void {
+    this.playbackVolume = vol;
+    const volStr = vol.toFixed(1);
+    this.ijkPlayer.setVolume(volStr, volStr);
   }
 
   build() {
@@ -793,6 +861,9 @@ export struct VideoPlayerView {
         currentSpeed: this.currentSpeed,
         isMuted: this.isMuted,
         isBuffering: this.isBuffering,
+        brightness: this.screenBrightness,
+        volume: this.playbackVolume,
+        subtitleDelayMs: this.subtitleDelayMs,
         onPlayPause: async () => {
           this.togglePlayback();
         },
@@ -824,6 +895,25 @@ export struct VideoPlayerView {
         onToggleMute: async () => {
           this.isMuted = !this.isMuted;
           this.ijkPlayer.setVolume(this.isMuted ? '0' : '1.0', this.isMuted ? '0' : '1.0');
+        },
+        onBrightnessChange: (brightness: number) => {
+          this.setScreenBrightness(brightness);
+        },
+        onVolumeChange: (volume: number) => {
+          this.setPlaybackVolume(volume);
+          this.isMuted = volume === 0;
+        },
+        onGestureSeek: (timeMs: number) => {
+          if (this.isPlaying) {
+            this.isBuffering = true;
+          }
+          this.ijkPlayer.seekTo(`${timeMs}`);
+        },
+        onSubtitleDelayChange: (delayMs: number) => {
+          this.setSubtitleDelay(delayMs);
+        },
+        onLoadSubtitle: () => {
+          this.selectSubtitleFile();
         },
         onPrevious: () => this.onPrevious(),
         onNext: () => this.onNext(),

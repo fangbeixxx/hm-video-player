@@ -328,6 +328,16 @@ struct Index {
 
         Blank()
 
+        // 在线视频按钮
+        Text('Online')
+          .fontSize(14)
+          .fontColor('#FF4081')
+          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+          .border({ width: 1, color: '#FF4081', radius: 4 })
+          .onClick(() => {
+            router.pushUrl({ url: 'pages/OnlinePage' });
+          })
+
         // 搜索按钮
         Image($r('app.media.ic_search'))
           .width(22)
