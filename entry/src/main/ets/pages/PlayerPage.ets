@@ -1,14 +1,17 @@
-﻿import { router } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { window } from '@kit.ArkUI';
 import { VideoPlayerView } from '../components/VideoPlayerView';
 import { PlayHistoryService } from '../service/PlayHistoryService';
+import { PlaylistItem } from '../model/VideoItem';
 
 interface PlayerRouteParams {
   videoId?: string;
   videoPath?: string;
   videoTitle?: string;
   seekTo?: number;
-  sourceType?: string; // 'local' | 'online'
+  sourceType?: string;
+  playlist?: PlaylistItem[];
+  playlistIndex?: number;
 }
 
 @Entry
@@ -20,6 +23,8 @@ struct PlayerPage {
   @State seekTo: number = 0;
   @State safeAreaTop: number = 0;
   @State playerReady: boolean = false;
+  @State playlist: PlaylistItem[] = [];
+  @State playlistIndex: number = 0;
 
   async aboutToAppear(): Promise<void> {
     this.playerReady = false;
@@ -30,6 +35,9 @@ struct PlayerPage {
       this.videoPath = params.videoPath || '';
       this.videoTitle = params.videoTitle || 'Unknown video';
       this.seekTo = params.seekTo || 0;
+      this.playlist = params.playlist || [];
+      this.playlistIndex = params.playlistIndex || 0;
+
       if (this.seekTo <= 0) {
         let record = this.videoId.length > 0 ? await PlayHistoryService.getInstance().getRecord(this.videoId) : null;
         if (record === null && this.videoPath.length > 0) {
@@ -41,9 +49,6 @@ struct PlayerPage {
           console.info('[ResumeFlow] PlayerPage restore seekTo from history=' + this.seekTo + ' videoId=' + this.videoId + ' path=' + this.videoPath);
         }
       }
-      console.info('[PlayerPage] videoId:', this.videoId);
-      console.info('[PlayerPage] videoPath:', this.videoPath);
-      console.info('[PlayerPage] videoTitle:', this.videoTitle);
       console.info('[ResumeFlow] PlayerPage resolved seekTo=' + this.seekTo + ' videoId=' + this.videoId + ' path=' + this.videoPath);
     } else {
       console.error('[PlayerPage] NO route params received!');
@@ -64,6 +69,41 @@ struct PlayerPage {
     }
   }
 
+  /**
+   * 切换到上一个视频
+   */
+  private goToPrevious(): void {
+    if (this.playlist.length === 0) return;
+    const newIndex = this.playlistIndex > 0 ? this.playlistIndex - 1 : this.playlist.length - 1;
+    this.switchToPlaylistIndex(newIndex);
+  }
+
+  /**
+   * 切换到下一个视频
+   */
+  private goToNext(): void {
+    if (this.playlist.length === 0) return;
+    const newIndex = (this.playlistIndex + 1) % this.playlist.length;
+    this.switchToPlaylistIndex(newIndex);
+  }
+
+  /**
+   * 切换到指定索引的视频（重新加载页面）
+   */
+  private switchToPlaylistIndex(index: number): void {
+    const item = this.playlist[index];
+    router.replaceUrl({
+      url: 'pages/PlayerPage',
+      params: {
+        videoId: item.id,
+        videoPath: item.path,
+        videoTitle: item.title,
+        playlist: this.playlist,
+        playlistIndex: index
+      }
+    });
+  }
+
   build() {
     Column() {
       Column()
@@ -77,7 +117,9 @@ struct PlayerPage {
           videoTitle: this.videoTitle,
           videoId: this.videoId,
           seekTo: this.seekTo,
-          onBack: () => router.back()
+          onBack: () => router.back(),
+          onPrevious: () => this.goToPrevious(),
+          onNext: () => this.goToNext()
         })
           .layoutWeight(1)
       } else {

@@ -1,10 +1,10 @@
-﻿import { router } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { window } from '@kit.ArkUI';
 import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
 import { MediaScanner } from '../service/MediaScanner';
 import { PlayHistoryService } from '../service/PlayHistoryService';
 import { VideoCard, VideoItemObserved } from '../components/VideoCard';
-import { VideoItem, PlayRecord } from '../model/VideoItem';
+import { VideoItem, PlayRecord, PlaylistItem } from '../model/VideoItem';
 import { SortType } from '../common/Enums';
 import { TimeUtils } from '../utils/TimeUtils';
 import { FileUtils } from '../utils/FileUtils';
@@ -17,6 +17,7 @@ import { FileUtils } from '../utils/FileUtils';
 struct Index {
   @State allVideos: VideoItemObserved[] = [];
   @State recentRecords: PlayRecord[] = [];
+  @State favoriteVideos: VideoItemObserved[] = [];
   @State isLoading: boolean = true;
   @State selectedTab: number = 0;
   @State currentSort: SortType = SortType.DATE_MODIFIED;
@@ -44,15 +45,16 @@ struct Index {
     ];
 
     try {
-      const context = getContext(this) as common.UIAbilityContext;
-      const data = await atManager.requestPermissionsFromUser(context, permissions);
+      const context = getContext(this);
+      const uiContext = context as common.UIAbilityContext;
+      const data = await atManager.requestPermissionsFromUser(uiContext, permissions);
       const granted = data.authResults.some((result: number) =>
         result === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED
       );
       if (granted) {
-        console.info('[Index] media read permission granted', JSON.stringify(data.authResults));
+        console.info('[Index] media read permission granted: ' + JSON.stringify(data.authResults));
       } else {
-        console.warn('[Index] media read permission denied by user', JSON.stringify(data.authResults));
+        console.warn('[Index] media read permission denied: ' + JSON.stringify(data.authResults));
       }
     } catch (e) {
       console.error('[Index] Request permission error: ' + JSON.stringify(e));
@@ -72,14 +74,15 @@ struct Index {
       const area = mainWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
       this.safeAreaTop = px2vp(area.topRect.height);
     } catch (e) {
-      console.error('Get safe area failed:', e);
+      console.error('Get safe area failed: ' + JSON.stringify(e));
       this.safeAreaTop = 0;
     }
   }
 
   async onShow(): Promise<void> {
-    // 页面显示时刷新最近播放
+    // 页面显示时刷新最近播放和收藏
     await this.loadRecentRecords();
+    await this.loadFavorites();
   }
 
   private async loadData(): Promise<void> {
@@ -93,7 +96,7 @@ struct Index {
       console.info('[Index] allVideos set, count=' + this.allVideos.length);
       await this.loadRecentRecords();
     } catch (e) {
-      console.error('[Index] Load data failed:', e);
+      console.error('[Index] Load data failed: ' + JSON.stringify(e));
       console.error('[Index] Error details: ' + JSON.stringify(e));
     }
     this.isLoading = false;
@@ -104,7 +107,20 @@ struct Index {
     try {
       this.recentRecords = await this.historyService.getHistory(20);
     } catch (e) {
-      console.error('Load history failed:', e);
+      console.error('Load history failed: ' + JSON.stringify(e));
+    }
+  }
+
+  private async loadFavorites(): Promise<void> {
+    try {
+      const favIds = await this.historyService.getFavorites();
+      // Match favorite IDs against all videos
+      const all = await this.scanner.scanVideos();
+      this.favoriteVideos = all
+        .filter(v => favIds.indexOf(v.id) >= 0)
+        .map(v => new VideoItemObserved(v));
+    } catch (e) {
+      console.error('Load favorites failed: ' + JSON.stringify(e));
     }
   }
 
@@ -112,12 +128,22 @@ struct Index {
    * 跳转播放页面
    */
   private goToPlayer(video: VideoItem): void {
+    // Build playlist from allVideos for prev/next navigation
+    const playlist: PlaylistItem[] = [];
+    for (const v of this.allVideos) {
+      const item: PlaylistItem = { id: v.id, path: v.path, title: v.title };
+      playlist.push(item);
+    }
+    const currentIndex = this.allVideos.findIndex(v => v.id === video.id);
+
     router.pushUrl({
       url: 'pages/PlayerPage',
       params: {
         videoId: video.id,
         videoPath: video.path,
-        videoTitle: video.title
+        videoTitle: video.title,
+        playlist: playlist,
+        playlistIndex: currentIndex >= 0 ? currentIndex : 0
       }
     });
   }
@@ -126,13 +152,23 @@ struct Index {
    * 继续播放历史记录
    */
   private continuePlay(record: PlayRecord): void {
+    // Build playlist from allVideos for prev/next
+    const playlist: PlaylistItem[] = [];
+    for (const v of this.allVideos) {
+      const item: PlaylistItem = { id: v.id, path: v.path, title: v.title };
+      playlist.push(item);
+    }
+    const currentIndex = this.allVideos.findIndex(v => v.id === record.videoId);
+
     router.pushUrl({
       url: 'pages/PlayerPage',
       params: {
         videoId: record.videoId,
         videoPath: record.path,
         videoTitle: record.title,
-        seekTo: record.lastPosition
+        seekTo: record.lastPosition,
+        playlist: playlist,
+        playlistIndex: currentIndex >= 0 ? currentIndex : 0
       }
     });
   }
@@ -189,7 +225,7 @@ struct Index {
                 onClicked: (v: VideoItem) => this.goToPlayer(v)
               })
             }
-          })
+          }, (video: VideoItemObserved) => video.id)
         }
         .padding({ left: 16, right: 16, top: 8, bottom: 16 })
         .scrollBar(BarState.Off)
@@ -216,11 +252,11 @@ struct Index {
         .justifyContent(FlexAlign.Center)
       } else {
         List({ space: 8 }) {
-          ForEach(this.recentRecords, (record: PlayRecord, index: number) => {
+          ForEach(this.recentRecords, (record: PlayRecord) => {
             ListItem() {
               this.RecentRecordCard(record)
             }
-          })
+          }, (record: PlayRecord) => record.videoId)
         }
         .padding({ left: 16, right: 16, top: 8, bottom: 16 })
         .scrollBar(BarState.Off)
@@ -295,18 +331,41 @@ struct Index {
 
   @Builder
   FavoritesTab() {
-    Column({ space: 12 }) {
-      Image($r('app.media.ic_favorite_border'))
-        .width(80)
-        .height(80)
-        .opacity(0.3)
-      Text('收藏功能开发中')
-        .fontSize(16)
-        .fontColor('#999999')
+    Column() {
+      if (this.favoriteVideos.length === 0) {
+        Column({ space: 12 }) {
+          Image($r('app.media.ic_favorite_border'))
+            .width(80)
+            .height(80)
+            .opacity(0.3)
+          Text('No favorites yet')
+            .fontSize(16)
+            .fontColor('#999999')
+          Text('Long-press a video to add to favorites')
+            .fontSize(13)
+            .fontColor('#CCCCCC')
+        }
+        .width('100%')
+        .height('100%')
+        .justifyContent(FlexAlign.Center)
+      } else {
+        List({ space: 8 }) {
+          ForEach(this.favoriteVideos, (video: VideoItemObserved) => {
+            ListItem() {
+              VideoCard({
+                video: video,
+                showDate: true,
+                onClicked: (v: VideoItem) => this.goToPlayer(v)
+              })
+            }
+          }, (video: VideoItemObserved) => video.id)
+        }
+        .padding({ left: 16, right: 16, top: 8, bottom: 16 })
+        .scrollBar(BarState.Off)
+      }
     }
     .width('100%')
     .height('100%')
-    .justifyContent(FlexAlign.Center)
   }
 
   // ========== 主布局 ==========

@@ -129,13 +129,18 @@ export class SourceParser {
     try {
       const response: IptvJsonResponse = JSON.parse(content);
       if (response.channels !== undefined && response.channels.length > 0) {
-        return response.channels.map((ch) => ({
-          id: ch.id || SourceParser.nextId(),
-          name: ch.name,
-          url: ch.url,
-          group: ch.group,
-          logo: ch.logo
-        }));
+        const channels: IptvChannel[] = [];
+        for (const ch of response.channels) {
+          const item: IptvChannel = {
+            id: ch.id || SourceParser.nextId(),
+            name: ch.name,
+            url: ch.url,
+            group: ch.group,
+            logo: ch.logo
+          };
+          channels.push(item);
+        }
+        return channels;
       }
     } catch (e) {
       // Not IPTV JSON
@@ -148,18 +153,23 @@ export class SourceParser {
     try {
       const response: MovieApiResponse = JSON.parse(content);
       if (response.list !== undefined && response.list.length > 0) {
-        return response.list.map((item) => ({
-          id: item.vod_id || SourceParser.nextId(),
-          title: item.vod_name || 'Unknown',
-          url: item.vod_play_url || '',
-          thumbnail: item.vod_pic,
-          category: item.type_name,
-          description: item.vod_content,
-          year: item.vod_year,
-          rating: item.vod_score,
-          actors: item.vod_actor,
-          director: item.vod_director
-        }));
+        const videos: OnlineVideoItem[] = [];
+        for (const item of response.list) {
+          const video: OnlineVideoItem = {
+            id: item.vod_id || SourceParser.nextId(),
+            title: item.vod_name || 'Unknown',
+            url: item.vod_play_url || '',
+            thumbnail: item.vod_pic,
+            category: item.type_name,
+            description: item.vod_content,
+            year: item.vod_year,
+            rating: item.vod_score,
+            actors: item.vod_actor,
+            director: item.vod_director
+          };
+          videos.push(video);
+        }
+        return videos;
       }
     } catch (e) {
       // Not CatVod format
@@ -169,18 +179,23 @@ export class SourceParser {
     try {
       const response: AppleCmsResponse = JSON.parse(content);
       if (response.list !== undefined && response.list.length > 0) {
-        return response.list.map((item) => ({
-          id: String(item.vod_id),
-          title: item.vod_name || 'Unknown',
-          url: item.vod_play_url || '',
-          thumbnail: item.vod_pic,
-          category: item.type_name,
-          description: item.vod_content,
-          year: item.vod_year,
-          rating: item.vod_score,
-          actors: item.vod_actor,
-          director: item.vod_director
-        }));
+        const videos: OnlineVideoItem[] = [];
+        for (const item of response.list) {
+          const video: OnlineVideoItem = {
+            id: String(item.vod_id),
+            title: item.vod_name || 'Unknown',
+            url: item.vod_play_url || '',
+            thumbnail: item.vod_pic,
+            category: item.type_name,
+            description: item.vod_content,
+            year: item.vod_year,
+            rating: item.vod_score,
+            actors: item.vod_actor,
+            director: item.vod_director
+          };
+          videos.push(video);
+        }
+        return videos;
       }
     } catch (e) {
       // Not AppleCMS format
@@ -190,16 +205,21 @@ export class SourceParser {
     try {
       const response: SimpleMovieResponse = JSON.parse(content);
       if (response.videos !== undefined && response.videos.length > 0) {
-        return response.videos.map((item) => ({
-          id: item.id || SourceParser.nextId(),
-          title: item.name || item.title || 'Unknown',
-          url: item.url,
-          thumbnail: item.pic || item.thumbnail,
-          category: item.category || item.type,
-          duration: item.duration,
-          description: item.desc,
-          year: item.year
-        }));
+        const videos: OnlineVideoItem[] = [];
+        for (const item of response.videos) {
+          const video: OnlineVideoItem = {
+            id: item.id || SourceParser.nextId(),
+            title: item.name || item.title || 'Unknown',
+            url: item.url,
+            thumbnail: item.pic || item.thumbnail,
+            category: item.category || item.type,
+            duration: item.duration,
+            description: item.desc,
+            year: item.year
+          };
+          videos.push(video);
+        }
+        return videos;
       }
     } catch (e) {
       // Not simple format

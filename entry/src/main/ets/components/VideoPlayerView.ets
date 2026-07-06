@@ -1,15 +1,8 @@
-﻿import { fileIo } from '@kit.CoreFileKit';
+import { fileIo } from '@kit.CoreFileKit';
 import { window } from '@kit.ArkUI';
+import { common } from '@kit.AbilityKit';
 import picker from '@ohos.file.picker';
 import util from '@ohos.util';
-import { VideoPlayerManager } from '../service/VideoPlayerManager';
-import { ControlPanel } from './ControlPanel';
-import { ErrorToast } from './ErrorDialog';
-import { PlayerState, PlaybackSpeed } from '../common/Enums';
-import { PlayerError, PlayerErrorCode, createPlayerError } from '../common/PlayerError';
-import { PlayHistoryService } from '../service/PlayHistoryService';
-import { SettingsService } from '../service/SettingsService';
-import { common } from '@kit.AbilityKit';
 import {
   IjkMediaPlayer,
   OnBufferingUpdateListener,
@@ -22,6 +15,16 @@ import {
   OnVideoSizeChangedListener,
   VideoCodecMode
 } from '@ohos/ijkplayer';
+import { VideoPlayerManager, PlaybackEngine } from '../service/VideoPlayerManager';
+import { ControlPanel } from './ControlPanel';
+import { ErrorToast } from './ErrorDialog';
+import { DanmakuLayer } from './DanmakuLayer';
+import { PlayerState, PlaybackSpeed } from '../common/Enums';
+import { PlayerError, PlayerErrorCode, createPlayerError } from '../common/PlayerError';
+import { PlayHistoryService } from '../service/PlayHistoryService';
+import { SettingsService } from '../service/SettingsService';
+import { QualityOption } from '../model/OnlineMedia';
+import { DanmakuEngine } from '../utils/DanmakuEngine';
 
 interface ErrorWithCode extends Error {
   code: number;
@@ -54,6 +57,8 @@ export struct VideoPlayerView {
   @Prop videoId: string;
 
   @Prop seekTo: number = 0;
+  @Prop qualities: QualityOption[] = [];
+  @State currentQualityLabel: string = 'Auto';
   onBack: () => void = () => {};
   onNext: () => void = () => {};
   onPrevious: () => void = () => {};
@@ -78,6 +83,10 @@ export struct VideoPlayerView {
   @State subtitleDelayMs: number = 0;
   @State screenBrightness: number = 0.5;
   @State playbackVolume: number = 1.0;
+  @State danmakuEnabled: boolean = false;
+
+  // Danmaku
+  private danmakuEngine: DanmakuEngine = new DanmakuEngine();
 
   private saveTimerId: number = -1;
   private progressTimerId: number = -1;
@@ -89,6 +98,7 @@ export struct VideoPlayerView {
   private pendingStartToken: number = 0;
   private ijkPlayer: IjkMediaPlayer = new IjkMediaPlayer(VIDEO_SURFACE_COMPONENT_ID);
   private nativeContext: Object | undefined = undefined;
+  private useAvPlayerEngine: boolean = false;
   private timedTextReady: boolean = false;
   private externalSubtitleCues: SubtitleCue[] = [];
   private pendingResumePosition: number = 0;
@@ -103,6 +113,7 @@ export struct VideoPlayerView {
     this.pendingResumePosition = this.seekTo;
     this.hasAppliedResumeSeek = false;
     this.subtitlesEnabled = await SettingsService.getInstance().getShowSubtitle();
+    this.useAvPlayerEngine = await SettingsService.getInstance().getHwAcceleration();
     await this.loadExternalSubtitles();
     await this.initPlayerManager();
     await this.startPlaybackIfReady();
@@ -123,9 +134,13 @@ export struct VideoPlayerView {
     this.isBuffering = false;
     this.subtitleText = '';
     try {
-      this.ijkPlayer.release();
+      if (this.engineType === 'AVPlayer') {
+        await this.playerManager.release();
+      } else {
+        this.ijkPlayer.release();
+      }
     } catch (error) {
-      console.warn('[VideoPlayerView] ijkPlayer release failed');
+      console.warn('[VideoPlayerView] player release failed');
     }
     await this.saveProgress();
     await this.playerManager.release();
@@ -271,6 +286,72 @@ export struct VideoPlayerView {
     }
   }
 
+  /**
+   * Check if file format is AVPlayer-friendly
+   */
+  private isAvPlayerFormat(path: string): boolean {
+    const lower = path.toLowerCase();
+    const avFormats: string[] = ['.mp4', '.m4v', '.mov', '.3gp', '.ts'];
+    for (const fmt of avFormats) {
+      if (lower.endsWith(fmt)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Attempt playback via VideoPlayerManager (AVPlayer engine)
+   */
+  private async tryAvPlayerPlayback(): Promise<boolean> {
+    try {
+      this.currentError = null;
+      this.showErrorDialog = false;
+      this.subtitleText = '';
+
+      this.playerManager.setAbilityContext(getContext(this) as common.UIAbilityContext);
+      await this.playerManager.init({
+        onError: (error: PlayerError) => {
+          console.error('[VideoPlayerView] AVPlayer error:', error.message);
+          this.handleError(error);
+        }
+      }, PlaybackEngine.AVPLAYER);
+
+      // Set surface for AVPlayer
+      if (this.surfaceId.length > 0) {
+        this.playerManager.setSurface(this.surfaceId);
+      }
+
+      await this.playerManager.setSource(this.videoPath);
+      this.playerManager.setDisplaySurface(this.surfaceId);
+
+      // Set speed before playing
+      await this.playerManager.setSpeed(this.currentSpeed);
+
+      // Apply resume seek if needed
+      if (this.pendingResumePosition > 0) {
+        await this.playerManager.play();
+        await new Promise<void>((resolve) => setTimeout(resolve, 300));
+        await this.playerManager.seekTo(this.pendingResumePosition);
+        this.hasAppliedResumeSeek = true;
+        this.clearResumePosition();
+      } else {
+        await this.playerManager.play();
+      }
+
+      this.playerState = PlayerState.PLAYING;
+      this.isPlaying = true;
+      this.playbackStarted = true;
+      this.engineType = 'AVPlayer';
+
+      // Start progress polling for AVPlayer
+      this.startProgressTimer();
+      return true;
+    } catch (error) {
+      console.error('[VideoPlayerView] AVPlayer setup failed: ' + JSON.stringify(error));
+      await this.playerManager.release();
+      return false;
+    }
+  }
+
   private clearResumePosition(): void {
     this.pendingResumePosition = 0;
     this.hasAppliedResumeSeek = true;
@@ -295,6 +376,16 @@ export struct VideoPlayerView {
 
     if (token !== this.pendingStartToken || !this.managerInitialized || this.playbackStarted || this.playbackStarting) {
       return;
+    }
+
+    // Try AVPlayer first if HW acceleration is enabled and format is AVPlayer-friendly
+    if (this.useAvPlayerEngine && this.isAvPlayerFormat(this.videoPath)) {
+      const avSuccess = await this.tryAvPlayerPlayback();
+      if (avSuccess) {
+        console.info('[VideoPlayerView] using AVPlayer engine');
+        return;
+      }
+      console.warn('[VideoPlayerView] AVPlayer failed, falling back to ijkplayer');
     }
 
     try {
@@ -324,7 +415,7 @@ export struct VideoPlayerView {
       this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, 'connect_timeout', '10000000');
       this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, 'addrinfo_timeout', '10000000');
       this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, 'dns_cache_timeout', '10000000');
-      this.ijkPlayer.setSpeed(`${this.currentSpeed}`);
+      this.ijkPlayer.setSpeed(`${this.currentSpeed}f`);
       this.ijkPlayer.setLoopCount(false);
       this.ijkPlayer.setScreenOnWhilePlaying(true);
       this.ijkPlayer.setDataSource(this.videoPath);
@@ -348,11 +439,24 @@ export struct VideoPlayerView {
 
   private startProgressTimer(): void {
     this.stopProgressTimer();
+    // Start danmaku engine with current time
+    this.danmakuEngine.start(this.currentTime);
     this.progressTimerId = setInterval(() => {
-      this.currentTime = this.ijkPlayer.getCurrentPosition();
-      this.duration = this.ijkPlayer.getDuration();
+      if (this.engineType === 'AVPlayer') {
+        this.currentTime = this.playerManager.currentTime;
+        this.duration = this.playerManager.duration;
+        this.isBuffering = this.playerManager.isBuffering;
+        this.playerState = this.playerManager.state;
+      } else {
+        this.currentTime = this.ijkPlayer.getCurrentPosition();
+        this.duration = this.ijkPlayer.getDuration();
+      }
       if (this.hasExternalSubtitles()) {
         this.updateExternalSubtitleForCurrentTime();
+      }
+      // Sync danmaku engine
+      if (this.danmakuEnabled) {
+        this.danmakuEngine.update(this.currentTime, 250);
       }
       if (this.saveTimerId < 0) {
         this.saveTimerId = setInterval(() => {
@@ -411,6 +515,20 @@ export struct VideoPlayerView {
   }
 
   private togglePlayback(): void {
+    if (this.engineType === 'AVPlayer') {
+      if (this.isPlaying) {
+        this.playerManager.pause();
+        this.playerState = PlayerState.PAUSED;
+        this.isPlaying = false;
+        this.isBuffering = false;
+      } else {
+        this.playerManager.play();
+        this.playerState = PlayerState.PLAYING;
+        this.isPlaying = true;
+      }
+      return;
+    }
+
     if (this.isPlaying) {
       this.ijkPlayer.pause();
       this.playerState = PlayerState.PAUSED;
@@ -789,11 +907,31 @@ export struct VideoPlayerView {
   }
 
   /**
-   * 调整字幕延迟
+   * 切换清晰度（由父组件通过 router.replaceUrl 重新加载，此处仅更新标记）
    */
+  private markQualitySwitch(label: string): void {
+    this.currentQualityLabel = label;
+  }
   setSubtitleDelay(delayMs: number): void {
     this.subtitleDelayMs = delayMs;
     console.info('[VideoPlayerView] subtitle delay set to ' + delayMs + 'ms');
+  }
+
+  /**
+   * Toggle danmaku on/off
+   */
+  toggleDanmaku(): void {
+    this.danmakuEnabled = !this.danmakuEnabled;
+    this.danmakuEngine.config.enabled = this.danmakuEnabled;
+  }
+
+  /**
+   * Send a danmaku comment
+   */
+  sendDanmaku(text: string): void {
+    if (text.trim().length > 0) {
+      this.danmakuEngine.sendDanmaku(text.trim());
+    }
   }
 
   /**
@@ -835,6 +973,9 @@ export struct VideoPlayerView {
           this.handleSurfaceDestroyed();
         })
 
+      // Danmaku layer (between video and subtitles)
+      DanmakuLayer({ engine: this.danmakuEngine })
+
       if (this.subtitlesEnabled && this.subtitleText.length > 0) {
         Column() {
           Blank()
@@ -871,30 +1012,52 @@ export struct VideoPlayerView {
           if (this.isPlaying) {
             this.isBuffering = true;
           }
-          this.ijkPlayer.seekTo(`${timeMs}`);
+          if (this.engineType === 'AVPlayer') {
+            this.playerManager.seekTo(timeMs);
+          } else {
+            this.ijkPlayer.seekTo(`${timeMs}`);
+          }
         },
         onSeekForward: async () => {
           if (this.isPlaying) {
             this.isBuffering = true;
           }
-          this.ijkPlayer.seekTo(`${this.currentTime + 10000}`);
+          const targetTime = this.currentTime + 10000;
+          if (this.engineType === 'AVPlayer') {
+            this.playerManager.seekTo(targetTime);
+          } else {
+            this.ijkPlayer.seekTo(`${targetTime}`);
+          }
         },
         onSeekBackward: async () => {
           if (this.isPlaying) {
             this.isBuffering = true;
           }
-          this.ijkPlayer.seekTo(`${Math.max(0, this.currentTime - 10000)}`);
+          const targetTime = Math.max(0, this.currentTime - 10000);
+          if (this.engineType === 'AVPlayer') {
+            this.playerManager.seekTo(targetTime);
+          } else {
+            this.ijkPlayer.seekTo(`${targetTime}`);
+          }
         },
         onSpeedChange: async () => {
           const speeds = [PlaybackSpeed.SPEED_0_5, PlaybackSpeed.SPEED_1_0, PlaybackSpeed.SPEED_1_5, PlaybackSpeed.SPEED_2_0];
           const currentIdx = speeds.indexOf(this.currentSpeed);
           const nextSpeed = speeds[(currentIdx + 1) % speeds.length];
           this.currentSpeed = nextSpeed;
-          this.ijkPlayer.setSpeed(`${nextSpeed}f`);
+          if (this.engineType === 'AVPlayer') {
+            this.playerManager.setSpeed(nextSpeed);
+          } else {
+            this.ijkPlayer.setSpeed(`${nextSpeed}f`);
+          }
         },
         onToggleMute: async () => {
           this.isMuted = !this.isMuted;
-          this.ijkPlayer.setVolume(this.isMuted ? '0' : '1.0', this.isMuted ? '0' : '1.0');
+          if (this.engineType === 'AVPlayer') {
+            this.playerManager.setVolume(this.isMuted ? 0 : 1.0);
+          } else {
+            this.ijkPlayer.setVolume(this.isMuted ? '0' : '1.0', this.isMuted ? '0' : '1.0');
+          }
         },
         onBrightnessChange: (brightness: number) => {
           this.setScreenBrightness(brightness);
@@ -914,6 +1077,19 @@ export struct VideoPlayerView {
         },
         onLoadSubtitle: () => {
           this.selectSubtitleFile();
+        },
+        qualities: this.qualities,
+        currentQualityLabel: this.currentQualityLabel,
+        onQualityChange: (option: QualityOption) => {
+          // Quality switching requires parent reload; just mark for now
+          this.markQualitySwitch(option.label);
+        },
+        danmakuEnabled: this.danmakuEnabled,
+        onToggleDanmaku: () => {
+          this.toggleDanmaku();
+        },
+        onSendDanmaku: (text: string) => {
+          this.sendDanmaku(text);
         },
         onPrevious: () => this.onPrevious(),
         onNext: () => this.onNext(),

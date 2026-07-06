@@ -1,4 +1,4 @@
-﻿import { router } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { window } from '@kit.ArkUI';
 import { PlayHistoryService } from '../service/PlayHistoryService';
 import { SettingsService } from '../service/SettingsService';
@@ -22,13 +22,23 @@ struct SettingsPage {
 
   async aboutToAppear(): Promise<void> {
     await this.initSafeArea();
-    this.showSubtitle = await this.settingsService.getShowSubtitle();
+    await this.loadSettings();
     try {
       const history = await this.historyService.getHistory();
       this.historyCount = history.length;
     } catch (error) {
       console.error('Load settings failed.');
     }
+  }
+
+  private async loadSettings(): Promise<void> {
+    this.showSubtitle = await this.settingsService.getShowSubtitle();
+    this.autoPlayNext = await this.settingsService.getAutoPlayNext();
+    this.hwAcceleration = await this.settingsService.getHwAcceleration();
+    this.backgroundPlay = await this.settingsService.getBackgroundPlay();
+    this.wifiOnly = await this.settingsService.getWifiOnly();
+    this.orientation = await this.settingsService.getOrientation();
+    this.defaultSpeed = await this.settingsService.getDefaultSpeed();
   }
 
   private async initSafeArea(): Promise<void> {
@@ -79,20 +89,23 @@ struct SettingsPage {
         }
 
         ListItem() {
-          this.SwitchItem('Auto play next', this.autoPlayNext, (val: boolean) => {
+          this.SwitchItem('Auto play next', this.autoPlayNext, async (val: boolean) => {
             this.autoPlayNext = val;
+            await this.settingsService.setAutoPlayNext(val);
           })
         }
 
         ListItem() {
-          this.SwitchItem('Hardware acceleration', this.hwAcceleration, (val: boolean) => {
+          this.SwitchItem('Hardware acceleration', this.hwAcceleration, async (val: boolean) => {
             this.hwAcceleration = val;
+            await this.settingsService.setHwAcceleration(val);
           })
         }
 
         ListItem() {
-          this.SwitchItem('Background play', this.backgroundPlay, (val: boolean) => {
+          this.SwitchItem('Background play', this.backgroundPlay, async (val: boolean) => {
             this.backgroundPlay = val;
+            await this.settingsService.setBackgroundPlay(val);
           })
         }
 
@@ -113,9 +126,9 @@ struct SettingsPage {
         }
 
         ListItem() {
-          this.SwitchItem('Show subtitles', this.showSubtitle, (val: boolean) => {
+          this.SwitchItem('Show subtitles', this.showSubtitle, async (val: boolean) => {
             this.showSubtitle = val;
-            this.settingsService.setShowSubtitle(val);
+            await this.settingsService.setShowSubtitle(val);
           })
         }
 
@@ -124,8 +137,9 @@ struct SettingsPage {
         }
 
         ListItem() {
-          this.SwitchItem('Wi-Fi only', this.wifiOnly, (val: boolean) => {
+          this.SwitchItem('Wi-Fi only', this.wifiOnly, async (val: boolean) => {
             this.wifiOnly = val;
+            await this.settingsService.setWifiOnly(val);
           })
         }
 
@@ -240,52 +254,40 @@ struct SettingsPage {
 
   private getSpeedLabel(speed: PlaybackSpeed): string {
     switch (speed) {
-      case PlaybackSpeed.SPEED_0_5:
-        return '0.5x';
-      case PlaybackSpeed.SPEED_0_75:
-        return '0.75x';
-      case PlaybackSpeed.SPEED_1_25:
-        return '1.25x';
-      case PlaybackSpeed.SPEED_1_5:
-        return '1.5x';
-      case PlaybackSpeed.SPEED_2_0:
-        return '2.0x';
-      default:
-        return '1.0x';
+      case PlaybackSpeed.SPEED_0_5: return '0.5x';
+      case PlaybackSpeed.SPEED_0_75: return '0.75x';
+      case PlaybackSpeed.SPEED_1_25: return '1.25x';
+      case PlaybackSpeed.SPEED_1_5: return '1.5x';
+      case PlaybackSpeed.SPEED_2_0: return '2.0x';
+      default: return '1.0x';
     }
   }
 
-  private cycleSpeed(): void {
+  private async cycleSpeed(): Promise<void> {
     const speeds: PlaybackSpeed[] = [
-      PlaybackSpeed.SPEED_0_5,
-      PlaybackSpeed.SPEED_0_75,
-      PlaybackSpeed.SPEED_1_0,
-      PlaybackSpeed.SPEED_1_25,
-      PlaybackSpeed.SPEED_1_5,
-      PlaybackSpeed.SPEED_2_0
+      PlaybackSpeed.SPEED_0_5, PlaybackSpeed.SPEED_0_75,
+      PlaybackSpeed.SPEED_1_0, PlaybackSpeed.SPEED_1_25,
+      PlaybackSpeed.SPEED_1_5, PlaybackSpeed.SPEED_2_0
     ];
     const idx = speeds.indexOf(this.defaultSpeed);
     this.defaultSpeed = speeds[(idx + 1) % speeds.length];
+    await this.settingsService.setDefaultSpeed(this.defaultSpeed);
   }
 
   private getOrientationLabel(orientation: ScreenOrientation): string {
     switch (orientation) {
-      case ScreenOrientation.LANDSCAPE:
-        return 'Landscape';
-      case ScreenOrientation.PORTRAIT:
-        return 'Portrait';
-      default:
-        return 'Auto';
+      case ScreenOrientation.LANDSCAPE: return 'Landscape';
+      case ScreenOrientation.PORTRAIT: return 'Portrait';
+      default: return 'Auto';
     }
   }
 
-  private cycleOrientation(): void {
+  private async cycleOrientation(): Promise<void> {
     const orientations: ScreenOrientation[] = [
-      ScreenOrientation.AUTO,
-      ScreenOrientation.LANDSCAPE,
-      ScreenOrientation.PORTRAIT
+      ScreenOrientation.AUTO, ScreenOrientation.LANDSCAPE, ScreenOrientation.PORTRAIT
     ];
     const idx = orientations.indexOf(this.orientation);
     this.orientation = orientations[(idx + 1) % orientations.length];
+    await this.settingsService.setOrientation(this.orientation);
   }
 }

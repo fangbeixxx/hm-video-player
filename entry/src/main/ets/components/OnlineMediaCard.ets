@@ -8,6 +8,7 @@ export struct MovieCard {
   @Prop item: OnlineVideoItem;
 
   onClicked: (item: OnlineVideoItem) => void = () => {};
+  onDownload: (item: OnlineVideoItem) => void = () => {};
 
   build() {
     Row({ space: 12 }) {
@@ -77,6 +78,16 @@ export struct MovieCard {
       .alignItems(HorizontalAlign.Start)
       .height(80)
       .justifyContent(FlexAlign.Center)
+
+      // Download action
+      Text('DL')
+        .fontSize(11)
+        .fontColor('#FF4081')
+        .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+        .border({ width: 1, color: '#FF4081', radius: 4 })
+        .onClick(() => {
+          this.onDownload(this.item);
+        })
     }
     .width('100%')
     .padding(10)

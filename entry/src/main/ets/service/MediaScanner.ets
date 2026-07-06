@@ -1,8 +1,10 @@
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { dataSharePredicates } from '@kit.ArkData';
 import { Environment, fileIo } from '@kit.CoreFileKit';
+import { image } from '@kit.ImageKit';
 import { VideoItem } from '../model/VideoItem';
 import { SortType, VideoSource } from '../common/Enums';
+import { Constants } from '../common/Constants';
 import { FFmpegNative } from '../native/FFmpegNative';
 
 export class MediaScanner {
@@ -55,7 +57,7 @@ export class MediaScanner {
       console.info('[MediaScanner] media library count=' + assets.length);
 
       for (const asset of assets) {
-        this.addVideoIfAbsent(seenKeys, mergedVideos, this.convertToVideoItem(asset));
+        this.addVideoIfAbsent(seenKeys, mergedVideos, await this.convertToVideoItem(asset));
       }
 
       fetchResult.close();
@@ -74,12 +76,20 @@ export class MediaScanner {
     return mergedVideos;
   }
 
-  private convertToVideoItem(asset: photoAccessHelper.PhotoAsset): VideoItem {
+  private async convertToVideoItem(asset: photoAccessHelper.PhotoAsset): Promise<VideoItem> {
     const duration = asset.get(photoAccessHelper.PhotoKeys.DURATION.toString()) as number;
     const size = asset.get(photoAccessHelper.PhotoKeys.SIZE.toString()) as number;
     const dateModified = asset.get(photoAccessHelper.PhotoKeys.DATE_MODIFIED.toString()) as number;
     const width = asset.get(photoAccessHelper.PhotoKeys.WIDTH.toString()) as number;
     const height = asset.get(photoAccessHelper.PhotoKeys.HEIGHT.toString()) as number;
+
+    // Generate thumbnail
+    let thumbnailPath: string = '';
+    try {
+      thumbnailPath = await this.generateThumbnail(asset);
+    } catch (e) {
+      // Thumbnail generation is optional; continue without it
+    }
 
     return {
       id: asset.uri,
@@ -90,9 +100,44 @@ export class MediaScanner {
       dateModified: dateModified || 0,
       width: width || 0,
       height: height || 0,
-      thumbnailPath: '',
+      thumbnailPath: thumbnailPath,
       source: VideoSource.LOCAL
     };
+  }
+
+  /**
+   * 为媒体库视频生成缩略图
+   */
+  private async generateThumbnail(asset: photoAccessHelper.PhotoAsset): Promise<string> {
+    try {
+      const pixelMap: image.PixelMap = await asset.getThumbnail({
+        width: Constants.THUMBNAIL_WIDTH,
+        height: Constants.THUMBNAIL_HEIGHT
+      } as photoAccessHelper.ThumbnailOptions);
+
+      const packer = image.createImagePacker();
+      const packOpts: image.PackingOption = {
+        format: 'image/jpeg',
+        quality: 80
+      };
+      const arrayBuffer: ArrayBuffer = await packer.packing(pixelMap, packOpts);
+      pixelMap.release();
+      packer.release();
+
+      // Save to cache directory
+      const cacheDir = getContext(this).cacheDir;
+      const thumbFileName = `thumb_${Date.now()}_${Math.floor(Math.random() * 10000)}.jpg`;
+      const thumbPath = `${cacheDir}/${thumbFileName}`;
+
+      const file = fileIo.openSync(thumbPath, fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY);
+      fileIo.writeSync(file.fd, arrayBuffer);
+      fileIo.closeSync(file);
+
+      return thumbPath;
+    } catch (e) {
+      console.warn('[MediaScanner] thumbnail generation failed: ' + JSON.stringify(e));
+      return '';
+    }
   }
 
   private async scanFileSystem(): Promise<VideoItem[]> {

@@ -16,10 +16,17 @@ export struct VideoCard {
     Row({ space: 12 }) {
       Stack({ alignContent: Alignment.BottomEnd }) {
         Column() {
-          Image($r('app.media.ic_video_placeholder'))
-            .width(40)
-            .height(40)
-            .opacity(0.8)
+          if (this.video.thumbnailPath && this.video.thumbnailPath.length > 0) {
+            Image(this.video.thumbnailPath)
+              .width('100%')
+              .height('100%')
+              .objectFit(ImageFit.Cover)
+          } else {
+            Image($r('app.media.ic_video_placeholder'))
+              .width(40)
+              .height(40)
+              .opacity(0.8)
+          }
         }
         .width(200)
         .height(120)

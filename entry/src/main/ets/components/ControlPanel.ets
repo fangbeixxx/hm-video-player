@@ -1,5 +1,6 @@
 import { TimeUtils } from '../utils/TimeUtils';
 import { PlayerState, PlaybackSpeed } from '../common/Enums';
+import { QualityOption } from '../model/OnlineMedia';
 
 @Component
 export struct ControlPanel {
@@ -34,6 +35,14 @@ export struct ControlPanel {
   // Subtitle callbacks
   onSubtitleDelayChange: (delayMs: number) => void = () => {};
   onLoadSubtitle: () => void = () => {};
+  // Quality callbacks
+  @Prop qualities: QualityOption[] = [];
+  @Prop currentQualityLabel: string = 'Auto';
+  onQualityChange: (option: QualityOption) => void = () => {};
+  // Danmaku
+  @Prop danmakuEnabled: boolean = false;
+  onToggleDanmaku: () => void = () => {};
+  onSendDanmaku: (text: string) => void = () => {};
 
   @State showControls: boolean = true;
   @State isDragging: boolean = false;
@@ -355,12 +364,45 @@ export struct ControlPanel {
                 this.showAndAutoHide();
               })
               this.MenuItem(`Sub delay: ${this.subtitleDelayMs > 0 ? '+' : ''}${(this.subtitleDelayMs / 1000).toFixed(1)}s`, () => {
-                // cycle through: 0 → +0.5 → +1.0 → -0.5 → -1.0 → 0
                 const delays = [0, 500, 1000, -500, -1000];
                 const idx = delays.indexOf(this.subtitleDelayMs);
                 const nextDelay = delays[(idx + 1) % delays.length];
                 this.onSubtitleDelayChange(nextDelay);
               })
+              if (this.qualities.length > 0) {
+                this.MenuItem(`Quality: ${this.currentQualityLabel}`, () => {
+                  // cycle through qualities + Auto
+                  const labels: string[] = ['Auto'];
+                  for (const q of this.qualities) {
+                    labels.push(q.label);
+                  }
+                  const currentIdx = labels.indexOf(this.currentQualityLabel);
+                  const nextLabel = labels[(currentIdx + 1) % labels.length];
+                  if (nextLabel === 'Auto') {
+                    // Switch back to default URL — handled by parent
+                  } else {
+                    const opt = this.qualities.find(q => q.label === nextLabel);
+                    if (opt) {
+                      this.showMoreMenu = false;
+                      this.onQualityChange(opt);
+                      return;
+                    }
+                  }
+                })
+              }
+              this.MenuItem(`Danmaku: ${this.danmakuEnabled ? 'ON' : 'OFF'}`, () => {
+                this.onToggleDanmaku();
+              })
+              // Danmaku quick send button
+              if (this.danmakuEnabled) {
+                this.MenuItem('Send danmaku...', () => {
+                  this.showMoreMenu = false;
+                  // Send a simple pre-made danmaku for demo
+                  const texts = ['666', 'Great!', 'LOL', 'Nice!', 'wow', 'Awesome'];
+                  const text = texts[Math.floor(Math.random() * texts.length)];
+                  this.onSendDanmaku(text);
+                })
+              }
             }
             .width(180)
             .backgroundColor('rgba(30,30,30,0.92)')
@@ -447,6 +489,17 @@ export struct ControlPanel {
 
               Blank()
 
+              // Previous video
+              Image($r('app.media.ic_skip_previous'))
+                .width(28)
+                .height(28)
+                .fillColor('#FFFFFF')
+                .margin({ right: 8 })
+                .onClick(() => {
+                  this.onPrevious();
+                  this.showAndAutoHide();
+                })
+
               // Rewind 10s
               Image($r('app.media.ic_replay_10'))
                 .width(36)
@@ -476,6 +529,17 @@ export struct ControlPanel {
                 .margin({ left: 16, right: 16 })
                 .onClick(() => {
                   this.onSeekForward();
+                  this.showAndAutoHide();
+                })
+
+              // Next video
+              Image($r('app.media.ic_skip_next'))
+                .width(28)
+                .height(28)
+                .fillColor('#FFFFFF')
+                .margin({ left: 8 })
+                .onClick(() => {
+                  this.onNext();
                   this.showAndAutoHide();
                 })
 

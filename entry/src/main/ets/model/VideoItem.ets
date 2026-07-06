@@ -32,3 +32,9 @@ export interface Playlist {
   createdAt: number;
   updatedAt: number;
 }
+
+export interface PlaylistItem {
+  id: string;
+  path: string;
+  title: string;
+}

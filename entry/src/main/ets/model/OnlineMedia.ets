@@ -17,6 +17,16 @@ export interface OnlineVideoItem {
   rating?: string;
   actors?: string;
   director?: string;
+  /** 多清晰度支持 */
+  qualities?: QualityOption[];
+}
+
+/**
+ * 清晰度选项
+ */
+export interface QualityOption {
+  label: string;
+  url: string;
 }
 
 /**

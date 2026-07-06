@@ -1,5 +1,6 @@
 import { preferences } from '@kit.ArkData';
 import { http } from '@kit.NetworkKit';
+import { common } from '@kit.AbilityKit';
 import util from '@ohos.util';
 import { MediaSource, OnlineVideoItem, IptvChannel } from '../model/OnlineMedia';
 import { SourceParser } from '../utils/SourceParser';
@@ -16,6 +17,7 @@ export class SourceManager {
   private static instance: SourceManager | null = null;
   private prefs: preferences.Preferences | null = null;
   private contentCache: Map<string, OnlineVideoItem[] | IptvChannel[]> = new Map();
+  private appContext: common.Context | null = null;
 
   static getInstance(): SourceManager {
     if (SourceManager.instance === null) {
@@ -24,9 +26,20 @@ export class SourceManager {
     return SourceManager.instance;
   }
 
+  setContext(ctx: common.Context): void {
+    this.appContext = ctx;
+  }
+
+  private getCtx(): common.Context {
+    if (this.appContext === null) {
+      throw new Error('SourceManager: context not set');
+    }
+    return this.appContext;
+  }
+
   private async getPrefs(): Promise<preferences.Preferences> {
     if (!this.prefs) {
-      this.prefs = await preferences.getPreferences(getContext(this), PREFS_NAME);
+      this.prefs = await preferences.getPreferences(this.getCtx(), PREFS_NAME);
     }
     return this.prefs;
   }
@@ -112,14 +125,19 @@ export class SourceManager {
       }
 
       let result: OnlineVideoItem[] | IptvChannel[] | null = null;
+      const lowerUrl: string = source.url.toLowerCase();
 
-      if (source.type === 'iptv' || source.url.toLowerCase().endsWith('.m3u') ||
-          source.url.toLowerCase().endsWith('.m3u8')) {
+      // Dispatch by file extension first, then by source type
+      if (lowerUrl.endsWith('.m3u') || lowerUrl.endsWith('.m3u8')) {
         result = SourceParser.parseM3u(content, source.url);
-      } else if (source.type === 'iptv' || source.url.toLowerCase().endsWith('.txt')) {
+      } else if (lowerUrl.endsWith('.txt')) {
         result = SourceParser.parseTxt(content, source.url);
+      } else if (source.type === 'iptv') {
+        // IPTV JSON source
+        const parsed = SourceParser.parseJson(content, source.url);
+        result = parsed;
       } else {
-        // Movie / IPTV JSON
+        // Movie JSON source
         if (content.trim().startsWith('{') || content.trim().startsWith('[')) {
           result = SourceParser.parseJson(content, source.url);
         }
@@ -195,7 +213,7 @@ export class SourceManager {
             if (typeof data.result === 'string') {
               result = data.result;
             } else if (data.result instanceof ArrayBuffer) {
-              const decoder = util.TextDecoder.create('utf-8', { fatal: false, ignoreBOM: false });
+              const decoder = new util.TextDecoder('utf-8', { fatal: false, ignoreBOM: false });
               result = decoder.decode(new Uint8Array(data.result as ArrayBuffer));
             } else if (typeof data.result === 'object') {
               result = JSON.stringify(data.result);

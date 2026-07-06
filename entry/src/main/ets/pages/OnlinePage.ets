@@ -1,6 +1,7 @@
 import { router } from '@kit.ArkUI';
 import { window } from '@kit.ArkUI';
 import { SourceManager } from '../service/SourceManager';
+import { DownloadManager } from '../service/DownloadManager';
 import { MediaSource, OnlineVideoItem, IptvChannel, MovieApiCategory } from '../model/OnlineMedia';
 import { MovieCard, ChannelCard, CategoryChip } from '../components/OnlineMediaCard';
 
@@ -40,8 +41,11 @@ struct OnlinePage {
   @State newSourceType: 'movie' | 'iptv' = 'movie';
 
   private sourceManager: SourceManager = SourceManager.getInstance();
+  private downloadManager: DownloadManager = DownloadManager.getInstance();
 
   async aboutToAppear(): Promise<void> {
+    this.sourceManager.setContext(getContext(this));
+    this.downloadManager.setContext(getContext(this));
     await this.initSafeArea();
     await this.loadSources();
   }
@@ -85,8 +89,46 @@ struct OnlinePage {
     }
 
     const content = await this.sourceManager.fetchSourceContent(source);
-    if (content && content.length > 0 && 'title' in content[0]) {
-      this.movies = content as OnlineVideoItem[];
+    // Extract movie items from union type
+    const movieItems: OnlineVideoItem[] = [];
+    if (content) {
+      for (let i = 0; i < content.length; i++) {
+        const item = content[i];
+        const itemTitle = item['title'];
+        const itemUrl = item['url'];
+        if (itemTitle !== undefined && itemUrl !== undefined) {
+          const video: OnlineVideoItem = {
+            id: String(item['id'] || ''),
+            title: String(itemTitle),
+            url: String(itemUrl),
+          };
+          if (item['thumbnail'] !== undefined) {
+            video.thumbnail = String(item['thumbnail']);
+          }
+          if (item['category'] !== undefined) {
+            video.category = String(item['category']);
+          }
+          if (item['description'] !== undefined) {
+            video.description = String(item['description']);
+          }
+          if (item['year'] !== undefined) {
+            video.year = String(item['year']);
+          }
+          if (item['rating'] !== undefined) {
+            video.rating = String(item['rating']);
+          }
+          if (item['actors'] !== undefined) {
+            video.actors = String(item['actors']);
+          }
+          if (item['director'] !== undefined) {
+            video.director = String(item['director']);
+          }
+          movieItems.push(video);
+        }
+      }
+    }
+    if (movieItems.length > 0) {
+      this.movies = movieItems;
       // Extract unique categories
       const catSet: string[] = [];
       for (const m of this.movies) {
@@ -94,7 +136,12 @@ struct OnlinePage {
           catSet.push(m.category);
         }
       }
-      this.movieCategories = catSet.map(c => ({ type_id: c, type_name: c }));
+      const categories: MovieApiCategory[] = [];
+      for (const c of catSet) {
+        const cat: MovieApiCategory = { type_id: c, type_name: c };
+        categories.push(cat);
+      }
+      this.movieCategories = categories;
       this.applyMovieFilters();
     }
     this.isLoadingMovies = false;
@@ -128,7 +175,12 @@ struct OnlinePage {
     });
   }
 
-  // ==================== IPTV Tab ====================
+  // ==================== Download ====================
+
+  private async startDownload(item: OnlineVideoItem): Promise<void> {
+    console.info('[OnlinePage] start download: ' + item.title);
+    await this.downloadManager.addTask(item.title, item.url);
+  }
 
   private async loadIptvChannels(): Promise<void> {
     if (this.selectedIptvSourceId.length === 0) return;
@@ -141,8 +193,30 @@ struct OnlinePage {
     }
 
     const content = await this.sourceManager.fetchSourceContent(source);
-    if (content && content.length > 0 && 'url' in content[0]) {
-      this.iptvChannels = content as IptvChannel[];
+    // Extract IPTV channels from union type
+    const channelItems: IptvChannel[] = [];
+    if (content) {
+      for (let i = 0; i < content.length; i++) {
+        const item = content[i];
+        const itemUrl = item['url'];
+        if (itemUrl !== undefined) {
+          const channel: IptvChannel = {
+            id: String(item['id'] || ''),
+            name: String(item['name'] || ''),
+            url: String(itemUrl),
+          };
+          if (item['group'] !== undefined) {
+            channel.group = String(item['group']);
+          }
+          if (item['logo'] !== undefined) {
+            channel.logo = String(item['logo']);
+          }
+          channelItems.push(channel);
+        }
+      }
+    }
+    if (channelItems.length > 0) {
+      this.iptvChannels = channelItems;
       // Extract unique groups
       const groupSet: string[] = [];
       for (const ch of this.iptvChannels) {
@@ -391,10 +465,10 @@ struct OnlinePage {
   MovieTabContent() {
     Column() {
       if (this.movieSources.length === 0) {
-        this.EmptyState('暂未添加影视源', '点击右上角 + 添加', () => { this.showAddSourceDialog = true; })
+        this.EmptyStateBuilder('暂未添加影视源', '点击右上角 + 添加', () => { this.showAddSourceDialog = true; })
       } else {
         // Source selector
-        this.SourceSelector(
+        this.SourceSelectorBuilder(
           this.movieSources,
           this.selectedMovieSourceId,
           (id: string) => {
@@ -460,7 +534,8 @@ struct OnlinePage {
               ListItem() {
                 MovieCard({
                   item: item,
-                  onClicked: (movie: OnlineVideoItem) => this.playMovie(movie)
+                  onClicked: (movie: OnlineVideoItem) => this.playMovie(movie),
+                  onDownload: (movie: OnlineVideoItem) => this.startDownload(movie)
                 })
               }
             })
@@ -481,10 +556,10 @@ struct OnlinePage {
   IptvTabContent() {
     Column() {
       if (this.iptvSources.length === 0) {
-        this.EmptyState('暂未添加 IPTV 直播源', '点击右上角 + 添加 M3U/TXT 源', () => { this.showAddSourceDialog = true; })
+        this.EmptyStateBuilder('暂未添加 IPTV 直播源', '点击右上角 + 添加 M3U/TXT 源', () => { this.showAddSourceDialog = true; })
       } else {
         // Source selector
-        this.SourceSelector(
+        this.SourceSelectorBuilder(
           this.iptvSources,
           this.selectedIptvSourceId,
           (id: string) => {
@@ -574,7 +649,9 @@ struct OnlinePage {
   // ==================== Shared Builders ====================
 
   @Builder
-  SourceSelector(sources: MediaSource[], selectedId: string, onSelect: (id: string) => void, onDelete: (id: string) => void) {
+  SourceSelectorBuilder(sources: MediaSource[], selectedId: string,
+                        onSelect: (id: string) => void,
+                        onDelete: (id: string) => void) {
     List() {
       ListItem() {
         Row({ space: 6 }) {
@@ -608,7 +685,7 @@ struct OnlinePage {
   }
 
   @Builder
-  EmptyState(title: string, subtitle: string, onAction: () => void) {
+  EmptyStateBuilder(title: string, subtitle: string, onAction: () => void) {
     Column({ space: 12 }) {
       Image($r('app.media.ic_empty'))
         .width(100)

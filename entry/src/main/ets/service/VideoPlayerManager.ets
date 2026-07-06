@@ -553,12 +553,27 @@ export class VideoPlayerManager {
   /**
    * ???????? FFmpeg
    */
+  /**
+   * 判断是否应使用 FFmpeg 解码（AUTO 模式下检测格式）
+   */
   private shouldUseFFmpeg(path: string): boolean {
     if (this.preferredEngine === PlaybackEngine.FFMPEG) return true;
     if (this.preferredEngine === PlaybackEngine.AVPLAYER) return false;
     if (this.isMediaLibraryUri(path)) return false;
 
-    // AUTO ???????? AVPlayer??????? FFmpeg ???????
+    // AUTO mode: use FFmpeg for formats AVPlayer may not handle well
+    const lowerPath = path.toLowerCase();
+    const ffmpegFormats: string[] = [
+      '.mkv', '.avi', '.wmv', '.flv', '.rmvb', '.rm',
+      '.vob', '.m2ts', '.ogv', '.asf', '.divx', '.xvid',
+      '.f4v', '.mts', '.m2t'
+    ];
+    for (const format of ffmpegFormats) {
+      if (lowerPath.endsWith(format)) {
+        console.info('[PlayerManager] AUTO mode: using FFmpeg for format ' + format);
+        return true;
+      }
+    }
     return false;
   }
 
