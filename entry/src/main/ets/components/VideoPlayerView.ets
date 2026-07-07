@@ -38,6 +38,18 @@ interface SubtitleCue {
   text: string;
 }
 
+function mapIjkError(what: number, extra: number): PlayerErrorCode {
+  // Common IjkPlayer error codes
+  if (extra === -2) return PlayerErrorCode.FILE_NOT_FOUND;
+  if (extra === -5) return PlayerErrorCode.FILE_READ_ERROR;
+  if (extra === -13) return PlayerErrorCode.PERMISSION_DENIED;
+  if (extra === -110) return PlayerErrorCode.NETWORK_TIMEOUT;
+  if (extra === -111) return PlayerErrorCode.NETWORK_CONNECTION_CLOSED;
+  if (extra === -12) return PlayerErrorCode.DECODER_INIT_FAILED;
+  if (what === -10000 && extra === 0) return PlayerErrorCode.INIT_FAILED;
+  return PlayerErrorCode.UNKNOWN;
+}
+
 const VIDEO_SURFACE_COMPONENT_ID: string = 'video_player_surface';
 const VIDEO_SURFACE_LIBRARY_NAME: string = 'ijkplayer_napi';
 const MEDIA_INFO_VIDEO_RENDERING_START: number = 3;
@@ -79,6 +91,7 @@ export struct VideoPlayerView {
   @State isFullscreen: boolean = false;
   @State showErrorDialog: boolean = false;
   @State showErrorToast: boolean = false;
+  @State showDetail: boolean = false;
   @State currentError: PlayerError | null = null;
   @State toastMessage: string = '';
   @State engineType: string = 'IjkPlayer';
@@ -274,8 +287,8 @@ export struct VideoPlayerView {
         this.isBuffering = false;
         this.subtitleText = '';
         this.playerState = PlayerState.ERROR;
-        this.handleError(createPlayerError(PlayerErrorCode.UNKNOWN,
-          `IjkPlayer error: what=${what}, extra=${extra}`));
+        this.handleError(createPlayerError(mapIjkError(what, extra),
+          `IjkPlayer error: what=${what}, extra=${extra}. Path: ${this.videoPath}`));
       }
     } as OnErrorListener);
 
@@ -413,10 +426,13 @@ export struct VideoPlayerView {
       this.showErrorDialog = false;
       this.subtitleText = '';
       this.timedTextReady = false;
+      // 1. Set rendering context first
       this.ijkPlayer.setContext(this.nativeContext, VIDEO_SURFACE_COMPONENT_ID);
+      // 2. Create native player BEFORE any other operations
+      this.ijkPlayer.native_setup(VideoCodecMode.SURFACE);
+      // 3. Now safe to configure the player
       this.ijkPlayer.reset();
       this.ijkPlayer.setDebug(true);
-      this.ijkPlayer.native_setup(VideoCodecMode.SURFACE);
       this.ijkPlayer.setVolume(this.isMuted ? '0' : '1.0', this.isMuted ? '0' : '1.0');
       this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, 'enable-accurate-seek', '1');
       this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, 'max-buffer-size', '102400');
@@ -1220,6 +1236,41 @@ export struct VideoPlayerView {
           .fontColor('#555555')
           .textAlign(TextAlign.Center)
           .padding({ top: 16 })
+
+        if (this.currentError?.suggestion) {
+          Text(this.currentError?.suggestion || '')
+            .fontSize(13)
+            .fontColor('#888888')
+            .width('100%')
+            .textAlign(TextAlign.Center)
+            .padding({ left: 24, right: 24, top: 8 })
+        }
+
+        if (this.currentError?.detail) {
+          Column() {
+            Text(this.showDetail ? this.loc.getString('error_hide_detail') : this.loc.getString('error_show_detail'))
+              .fontSize(12)
+              .fontColor('#2196F3')
+              .onClick(() => {
+                this.showDetail = !this.showDetail;
+              })
+
+            if (this.showDetail) {
+              Text(this.currentError?.detail || '')
+                .fontSize(11)
+                .fontColor('#777777')
+                .fontFamily('monospace')
+                .padding(12)
+                .width('100%')
+                .backgroundColor('#FAFAFA')
+                .borderRadius(8)
+                .margin({ top: 8 })
+                .copyOption(CopyOptions.LocalDevice)
+            }
+          }
+          .width('100%')
+          .padding({ left: 24, right: 24, top: 12 })
+        }
       }
       .padding({ bottom: 20 })
 
