@@ -24,8 +24,10 @@ import { PlayerError, PlayerErrorCode, createPlayerError } from '../common/Playe
 import { PlayHistoryService } from '../service/PlayHistoryService';
 import { SettingsService } from '../service/SettingsService';
 import { QualityOption } from '../model/OnlineMedia';
+import { IptvChannel } from '../model/OnlineMedia';
 import { LocalizationManager } from '../utils/LocalizationManager';
 import { DanmakuEngine } from '../utils/DanmakuEngine';
+import { SourceParser } from '../utils/SourceParser';
 import { PiPManager, PiPState } from '../service/PiPManager';
 
 interface ErrorWithCode extends Error {
@@ -168,7 +170,7 @@ export struct VideoPlayerView {
     try {
       if (this.engineType === 'AVPlayer') {
         await this.playerManager.release();
-      } else {
+      } else if (this.playbackStarted) {
         this.ijkPlayer.release();
       }
     } catch (error) {
@@ -195,6 +197,9 @@ export struct VideoPlayerView {
         this.engineType = 'IjkPlayer';
         this.applyResumeSeekIfNeeded();
         this.updateExternalSubtitleForCurrentTime();
+        // Player is now ready — start progress tracking
+        this.startProgressTimer();
+        this.saveProgress();
         console.info('[VideoPlayerView] ijk prepared, duration:', this.duration);
       }
     } as OnPreparedListener);
@@ -322,6 +327,10 @@ export struct VideoPlayerView {
    * Check if file format is AVPlayer-friendly
    */
   private isAvPlayerFormat(path: string): boolean {
+    // Network streams — let AVPlayer handle HLS/HTTP streaming natively
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      return true;
+    }
     const lower = path.toLowerCase();
     const avFormats: string[] = ['.mp4', '.m4v', '.mov', '.3gp', '.ts'];
     for (const fmt of avFormats) {
@@ -352,8 +361,12 @@ export struct VideoPlayerView {
         this.playerManager.setSurface(this.surfaceId);
       }
 
-      await this.playerManager.setSource(this.videoPath);
-      this.playerManager.setDisplaySurface(this.surfaceId);
+      // Route to URL or file source
+      if (this.videoPath.startsWith('http://') || this.videoPath.startsWith('https://')) {
+        await this.playerManager.setUrlSource(this.videoPath);
+      } else {
+        await this.playerManager.setSource(this.videoPath);
+      }
 
       // Set speed before playing
       await this.playerManager.setSpeed(this.currentSpeed);
@@ -378,7 +391,9 @@ export struct VideoPlayerView {
       this.startProgressTimer();
       return true;
     } catch (error) {
-      console.error('[VideoPlayerView] AVPlayer setup failed: ' + JSON.stringify(error));
+      const err = error as ErrorWithCode;
+      const errMsg: string = (typeof err.message === 'string') ? err.message : String(error);
+      console.error('[VideoPlayerView] AVPlayer setup failed: ' + errMsg + ' surfaceId=' + this.surfaceId + ' path=' + this.videoPath);
       await this.playerManager.release();
       return false;
     }
@@ -410,13 +425,17 @@ export struct VideoPlayerView {
       return;
     }
 
-    // Try AVPlayer first if HW acceleration is enabled and format is AVPlayer-friendly
-    if (this.useAvPlayerEngine && this.isAvPlayerFormat(this.videoPath)) {
+    // Try AVPlayer first — always for HTTP streams, or when HW accel enabled for local files
+    const isHttp: boolean = this.videoPath.startsWith('http://') || this.videoPath.startsWith('https://');
+    const tryAv: boolean = isHttp || (this.useAvPlayerEngine && this.isAvPlayerFormat(this.videoPath));
+    console.info('[VideoPlayerView] tryAvPlayer=' + tryAv + ' useAvEngine=' + this.useAvPlayerEngine + ' isHttp=' + isHttp + ' path=' + this.videoPath);
+    if (tryAv) {
       const avSuccess = await this.tryAvPlayerPlayback();
       if (avSuccess) {
         console.info('[VideoPlayerView] using AVPlayer engine');
         return;
       }
+      // For HTTP streams, also try IjkPlayer as fallback — it supports HLS/HTTP streaming
       console.warn('[VideoPlayerView] AVPlayer failed, falling back to ijkplayer');
     }
 
@@ -426,12 +445,48 @@ export struct VideoPlayerView {
       this.showErrorDialog = false;
       this.subtitleText = '';
       this.timedTextReady = false;
-      // 1. Set rendering context first
-      this.ijkPlayer.setContext(this.nativeContext, VIDEO_SURFACE_COMPONENT_ID);
-      // 2. Create native player BEFORE any other operations
-      this.ijkPlayer.native_setup(VideoCodecMode.SURFACE);
-      // 3. Now safe to configure the player
+      // Resolve local M3U/M3U8 playlist files to actual stream URLs
+      const lowerPath: string = this.videoPath.toLowerCase();
+      if ((lowerPath.endsWith('.m3u') || lowerPath.endsWith('.m3u8')) &&
+          !this.videoPath.startsWith('http://') && !this.videoPath.startsWith('https://')) {
+        try {
+          const m3uContent: string = this.readTextFile(this.videoPath);
+          const channels: IptvChannel[] = SourceParser.parseM3u(m3uContent, this.videoPath);
+          if (channels.length > 0) {
+            const firstUrl: string = channels[0].url;
+            if (firstUrl.startsWith('http://') || firstUrl.startsWith('https://')) {
+              this.videoPath = firstUrl;
+              console.info('[VideoPlayerView] M3U resolved to: ' + firstUrl);
+            } else if (firstUrl.length > 0) {
+              // Relative local path — resolve against M3U file's directory
+              const lastSlash: number = this.videoPath.lastIndexOf('/');
+              const baseDir: string = lastSlash >= 0 ? this.videoPath.substring(0, lastSlash + 1) : '';
+              this.videoPath = baseDir + firstUrl;
+              console.info('[VideoPlayerView] M3U resolved to local: ' + this.videoPath);
+            }
+          }
+        } catch (e) {
+          console.warn('[VideoPlayerView] M3U parse failed: ' + JSON.stringify(e));
+        }
+      }
+      // 1. Reset JS wrapper state before creating native player
+      //    (reset() operates on native object — must be called BEFORE native_setup,
+      //     otherwise it destroys the player that native_setup just created)
       this.ijkPlayer.reset();
+      // 2. Set rendering context first
+      this.ijkPlayer.setContext(this.nativeContext, VIDEO_SURFACE_COMPONENT_ID);
+      // Wait for surface registration to complete
+      await new Promise<void>((resolve) => setTimeout(resolve, 100));
+      // 3. Create native player
+      this.ijkPlayer.native_setup(VideoCodecMode.SURFACE);
+      // Verify player was created
+      try {
+        this.ijkPlayer.getDuration();
+      } catch (e) {
+        console.error('[VideoPlayerView] native_setup failed — player not created');
+        throw new Error('IjkPlayer native_setup failed');
+      }
+      // 4. Now safe to configure the player
       this.ijkPlayer.setDebug(true);
       this.ijkPlayer.setVolume(this.isMuted ? '0' : '1.0', this.isMuted ? '0' : '1.0');
       // Essential options — keep minimal for broad device compatibility
@@ -460,16 +515,19 @@ export struct VideoPlayerView {
       this.ijkPlayer.setMessageListener();
       this.ijkPlayer.prepareAsync();
       this.ijkPlayer.start();
-      this.playerState = PlayerState.PLAYING;
+      // State and timer moved to onPrepared callback
       this.isPlaying = true;
       this.playbackStarted = true;
-      this.startProgressTimer();
       console.info('[VideoPlayerView] ijk play() called successfully');
     } catch (error) {
       const err = error as ErrorWithCode;
-      console.error('[VideoPlayerView] ijk setup failed:', JSON.stringify(err));
+      const errMsg: string = (typeof err.message === 'string') ? err.message : String(error);
+      const errCode: number = (typeof err.code === 'number') ? err.code : 0;
+      console.error('[VideoPlayerView] ijk setup failed: ' + errMsg + ' code=' + errCode);
+      this.playerState = PlayerState.ERROR;
+      this.stopProgressTimer();
       this.handleError(createPlayerError(PlayerErrorCode.UNKNOWN,
-        `Ijk setup failed: ${err.message}. Path=${this.videoPath}`));
+        `Ijk setup failed: ${errMsg}. Path=${this.videoPath}`));
     } finally {
       this.playbackStarting = false;
     }
@@ -479,7 +537,16 @@ export struct VideoPlayerView {
     this.stopProgressTimer();
     // Start danmaku engine with current time
     this.danmakuEngine.start(this.currentTime);
+    // Start save timer immediately (every 5s)
+    this.saveTimerId = setInterval(() => {
+      if (this.playerState !== PlayerState.ERROR && this.playerState !== PlayerState.IDLE) {
+        this.saveProgress();
+      }
+    }, 5000);
     this.progressTimerId = setInterval(() => {
+      if (this.playerState === PlayerState.ERROR || this.playerState === PlayerState.IDLE) {
+        return;
+      }
       if (this.engineType === 'AVPlayer') {
         this.currentTime = this.playerManager.currentTime;
         this.duration = this.playerManager.duration;
@@ -495,11 +562,6 @@ export struct VideoPlayerView {
       // Sync danmaku engine
       if (this.danmakuEnabled) {
         this.danmakuEngine.update(this.currentTime, 250);
-      }
-      if (this.saveTimerId < 0) {
-        this.saveTimerId = setInterval(() => {
-          this.saveProgress();
-        }, 5000);
       }
     }, 250);
   }
@@ -583,9 +645,7 @@ export struct VideoPlayerView {
   }
 
   private async saveProgress(): Promise<void> {
-    if (this.duration <= 0) return;
-
-    const shouldClearProgress = this.currentTime >= this.duration - RESUME_END_GUARD_MS;
+    const shouldClearProgress = this.duration > 0 && this.currentTime >= this.duration - RESUME_END_GUARD_MS;
     const positionToSave = shouldClearProgress ? 0 : this.currentTime;
 
     try {
@@ -600,6 +660,24 @@ export struct VideoPlayerView {
       });
     } catch (error) {
       console.warn('Save progress failed.');
+    }
+  }
+
+  private readTextFile(path: string): string {
+    const file: fileIo.File = fileIo.openSync(path, fileIo.OpenMode.READ_ONLY);
+    try {
+      const stat: fileIo.Stat = fileIo.statSync(path);
+      const size: number = Number(stat.size);
+      if (size <= 0) {
+        return '';
+      }
+      const buf: ArrayBuffer = new ArrayBuffer(size);
+      const read: number = fileIo.readSync(file.fd, buf);
+      const bytes: Uint8Array = new Uint8Array(buf, 0, read);
+      const decoder: util.TextDecoder = util.TextDecoder.create('utf-8', { fatal: false, ignoreBOM: false });
+      return decoder.decode(bytes);
+    } finally {
+      fileIo.closeSync(file);
     }
   }
 

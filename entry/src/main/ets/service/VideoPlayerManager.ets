@@ -105,25 +105,43 @@ export class VideoPlayerManager {
   }
 
   /**
-   * 閲婃斁鎾斁鍣ㄨ祫婧?   */
+   * 释放播放器资源
+   * 注意：无论 AVPlayer 处于什么状态（包括 error），都必须确保 avPlayer 被置 null，
+   * 否则下次 init() → setupAVPlayerXxx() 会复用已损坏的 AVPlayer 实例。
+   */
   async release(): Promise<void> {
     this.stopTimePoll();
 
     if (this.avPlayer) {
-      this.removeAVPlayerListeners();
-      await this.avPlayer.release();
+      try {
+        this.removeAVPlayerListeners();
+      } catch (e) {
+        console.warn('[PlayerManager] removeAVPlayerListeners failed:', JSON.stringify(e));
+      }
+      try {
+        await this.avPlayer.release();
+      } catch (error) {
+        const err = error as ErrorWithCode;
+        console.warn('[PlayerManager] AVPlayer release failed, code:', err.code, 'msg:', err.message);
+      }
+      // 关键：不管 release() 是否抛异常，都必须置 null，防止复用已损坏的实例
       this.avPlayer = null;
     }
 
     if (this.ffmpegDecoder) {
-      this.ffmpegDecoder.stop();
-      this.ffmpegDecoder.destroy();
+      try {
+        this.ffmpegDecoder.stop();
+        this.ffmpegDecoder.destroy();
+      } catch (e) {
+        console.warn('[PlayerManager] FFmpeg release failed:', JSON.stringify(e));
+      }
       this.ffmpegDecoder = null;
     }
 
     this.closeFd();
     this.useFFmpeg = false;
     this.isPrepared = false;
+    this.appliedSurfaceId = '';
     this._state = PlayerState.IDLE;
     this._currentTime = 0;
     this._duration = 0;
@@ -168,13 +186,16 @@ export class VideoPlayerManager {
     console.warn('[PlayerManager] FFmpeg has no native XComponent id; skip legacy surfaceId fallback');
   }
 
+  private appliedSurfaceId: string = '';
+
   private applyAVPlayerSurface(): void {
     if (!this.avPlayer) {
       return;
     }
 
-    if (this.surfaceId.length > 0) {
+    if (this.surfaceId.length > 0 && this.surfaceId !== this.appliedSurfaceId) {
       this.avPlayer.surfaceId = this.surfaceId;
+      this.appliedSurfaceId = this.surfaceId;
       console.info('[PlayerManager] surfaceId set:', this.surfaceId);
     }
   }
@@ -216,7 +237,7 @@ export class VideoPlayerManager {
       if (Date.now() - start > timeoutMs) {
         throw new Error(`Timed out waiting for AVPlayer state: ${targetState}, current=${this.avPlayer.state}`);
       }
-      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+      await new Promise<void>((resolve) => setTimeout(resolve, 80));
     }
   }
 
@@ -272,11 +293,14 @@ export class VideoPlayerManager {
         await this.setupAVPlayerUrlSource(url);
       } catch (e) {
         await this.disposeAVPlayer();
+        const err = e as ErrorWithCode;
+        const errMsg: string = (typeof err.message === 'string') ? err.message : String(e);
+        const code: string = (typeof err.code === 'number') ? String(err.code) : '?';
         console.warn('AVPlayer failed for URL, falling back to FFmpeg:', e);
         if (FFmpegNative.isAvailable()) {
           await this.setupFFmpegSource(url);
         } else {
-          throw new Error('AVPlayer failed for URL and FFmpeg is unavailable');
+          throw new Error('AVPlayer error [code=' + code + ']: ' + errMsg);
         }
       } finally {
         this.suppressAVPlayerErrors = false;
@@ -288,6 +312,12 @@ export class VideoPlayerManager {
 
   private async setupAVPlayerSource(filePath: string): Promise<void> {
     console.info('[PlayerManager] setupAVPlayerSource:', filePath);
+    // If AVPlayer exists but is in error state, destroy and recreate it.
+    // A stale errored AVPlayer cannot be reused — it must be replaced.
+    if (this.avPlayer && this.avPlayer.state === 'error') {
+      console.warn('[PlayerManager] AVPlayer in error state, disposing and recreating...');
+      await this.disposeAVPlayer();
+    }
     if (!this.avPlayer) {
       console.info('[PlayerManager] creating AVPlayer...');
       this.avPlayer = await media.createAVPlayer();
@@ -303,10 +333,13 @@ export class VideoPlayerManager {
       : fileIo.openSync(filePath, fileIo.OpenMode.READ_ONLY).fd;
     this.openedFd = fd;
     console.info('[PlayerManager] file opened, fd:', fd);
+    // Step 1: Set fdSrc → AVPlayer state transitions from idle → initialized
     this.avPlayer.fdSrc = { fd: fd, offset: 0, length: 0 };
     console.info('[PlayerManager] fdSrc set');
     await this.waitForAVPlayerState('initialized');
+    // Step 2: SurfaceId can ONLY be set when AVPlayer is in 'initialized' state
     this.applyAVPlayerSurface();
+    // Step 3: Prepare → state transitions from initialized → prepared
     await this.avPlayer.prepare();
     await this.waitForAVPlayerState('prepared');
     this.applyAVPlayerDisplayOptions();
@@ -316,6 +349,12 @@ export class VideoPlayerManager {
   }
 
   private async setupAVPlayerUrlSource(url: string): Promise<void> {
+    // If AVPlayer exists but is in error state, destroy and recreate it.
+    // A stale errored AVPlayer cannot be reused — it must be replaced.
+    if (this.avPlayer && this.avPlayer.state === 'error') {
+      console.warn('[PlayerManager] AVPlayer in error state, disposing and recreating...');
+      await this.disposeAVPlayer();
+    }
     if (!this.avPlayer) {
       this.avPlayer = await media.createAVPlayer();
       this.setupAVPlayerListeners();
@@ -323,11 +362,16 @@ export class VideoPlayerManager {
 
     this.closeFd();
     this.isPrepared = false;
+    // Step 1: Set URL → AVPlayer state transitions from idle → initialized
     this.avPlayer.url = url;
     await this.waitForAVPlayerState('initialized');
+    // Step 2: SurfaceId can ONLY be set when AVPlayer is in 'initialized' state
     this.applyAVPlayerSurface();
+    // Step 3: Prepare → state transitions from initialized → prepared
     await this.avPlayer.prepare();
-    await this.waitForAVPlayerState('prepared');
+    // Network streams (HLS/DASH) can take several seconds to resolve — use longer timeout.
+    const isHttpStream: boolean = url.startsWith('http://') || url.startsWith('https://');
+    await this.waitForAVPlayerState('prepared', isHttpStream ? 15000 : 5000);
     this.applyAVPlayerDisplayOptions();
     this.isPrepared = true;
     this.useFFmpeg = false;

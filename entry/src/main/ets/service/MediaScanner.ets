@@ -12,7 +12,8 @@ export class MediaScanner {
   private cachedVideos: VideoItem[] = [];
   private readonly supportedVideoExtensions: Array<string> = [
     '.mp4', '.m4v', '.mov', '.mkv', '.avi', '.flv', '.wmv', '.webm',
-    '.ts', '.mpg', '.mpeg', '.vob', '.m2ts', '.rmvb', '.rm', '.3gp', '.asf', '.ogv'
+    '.ts', '.mpg', '.mpeg', '.vob', '.m2ts', '.rmvb', '.rm', '.3gp', '.asf', '.ogv',
+    '.m3u', '.m3u8'
   ];
 
   static getInstance(): MediaScanner {
@@ -280,10 +281,22 @@ export class MediaScanner {
         return null;
       }
 
-      const mediaInfo = FFmpegNative.getMediaInfo(path);
-      const durationMs = mediaInfo !== null && mediaInfo.duration > 0
-        ? Math.floor(mediaInfo.duration * 1000)
-        : 0;
+      let durationMs: number = 0;
+      let videoWidth: number = 0;
+      let videoHeight: number = 0;
+      try {
+        const mediaInfo = FFmpegNative.getMediaInfo(path);
+        if (mediaInfo !== null) {
+          if (mediaInfo.duration > 0) {
+            durationMs = Math.floor(mediaInfo.duration * 1000);
+          }
+          videoWidth = mediaInfo.width || 0;
+          videoHeight = mediaInfo.height || 0;
+        }
+      } catch (e) {
+        // FFmpeg may fail for some files; still list the video without metadata
+        console.warn('[MediaScanner] getMediaInfo failed for: ' + path);
+      }
 
       return {
         id: path,
@@ -293,8 +306,8 @@ export class MediaScanner {
         size: stat.size,
         dateModified: stat.mtime * 1000,
         mimeType: this.guessMimeType(path),
-        width: mediaInfo?.width || 0,
-        height: mediaInfo?.height || 0,
+        width: videoWidth,
+        height: videoHeight,
         thumbnailPath: '',
         source: VideoSource.LOCAL
       };

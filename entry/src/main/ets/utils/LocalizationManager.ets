@@ -103,6 +103,7 @@ export class LocalizationManager {
     // App
     m.set('app_title', '\u89C6\u9891\u64AD\u653E\u5668');
     m.set('app_online', '\u5728\u7EBF');
+    m.set('index_online_btn', '\u5728\u7EBF\u5F71\u89C6');
     m.set('app_unknown_video', '\u672A\u77E5\u89C6\u9891');
     // Index
     m.set('index_scanning', '\u6B63\u5728\u626B\u63CF\u89C6\u9891...');
@@ -205,6 +206,7 @@ export class LocalizationManager {
     // App
     m.set('app_title', 'Video Player');
     m.set('app_online', 'Online');
+    m.set('index_online_btn', 'Online Videos');
     m.set('app_unknown_video', 'Unknown video');
     // Index
     m.set('index_scanning', 'Scanning videos...');

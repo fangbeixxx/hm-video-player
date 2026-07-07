@@ -1,6 +1,6 @@
-# 鸿蒙平板视频播放器
+# 鸿蒙视频播放器
 
-HarmonyOS 平板原生视频播放器，使用 ArkTS + ArkUI 开发，集成 IjkPlayer / AVPlayer 双引擎。
+HarmonyOS 原生视频播放器，使用 ArkTS + ArkUI 开发，集成 IjkPlayer / AVPlayer 双引擎。
 
 ## 功能特性
 

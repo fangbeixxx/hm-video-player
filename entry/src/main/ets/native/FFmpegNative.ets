@@ -118,12 +118,23 @@ export class FFmpegDecoderInstance {
 }
 
 export class FFmpegNative {
-  private static nativeModule: NativeDecoderModule = nativeModule as NativeDecoderModule;
-  private static available: boolean = true;
+  private static nativeModule: NativeDecoderModule | undefined = undefined;
+  private static available: boolean = false;
 
   static init(): boolean {
-    FFmpegNative.available = FFmpegNative.nativeModule.createDecoder !== undefined;
-    return FFmpegNative.available;
+    try {
+      if (FFmpegNative.nativeModule === undefined) {
+        FFmpegNative.nativeModule = nativeModule as NativeDecoderModule;
+      }
+      if (FFmpegNative.nativeModule && typeof FFmpegNative.nativeModule.createDecoder === 'function') {
+        FFmpegNative.available = true;
+        return true;
+      }
+    } catch (e) {
+      // Native module not available
+    }
+    FFmpegNative.available = false;
+    return false;
   }
 
   static isAvailable(): boolean {
@@ -131,26 +142,24 @@ export class FFmpegNative {
   }
 
   static create(): FFmpegDecoderInstance | null {
-    if (!FFmpegNative.init()) return null;
-
+    if (!FFmpegNative.init() || FFmpegNative.nativeModule === undefined) return null;
     const handle = FFmpegNative.nativeModule.createDecoder();
     if (handle < 0) return null;
-
     return new FFmpegDecoderInstance(FFmpegNative.nativeModule, handle);
   }
 
   static getMediaInfo(path: string): MediaInfo | null {
-    if (!FFmpegNative.init()) return null;
+    if (!FFmpegNative.init() || FFmpegNative.nativeModule === undefined) return null;
     return FFmpegNative.nativeModule.getMediaInfo(path);
   }
 
   static registerXComponentSurface(xComponentId: string, context: Object): boolean {
-    if (!FFmpegNative.init()) return false;
+    if (!FFmpegNative.init() || FFmpegNative.nativeModule === undefined) return false;
     return FFmpegNative.nativeModule.registerXComponentSurface(xComponentId, context);
   }
 
   static isCodecSupported(codecName: string): boolean {
-    if (!FFmpegNative.init()) return false;
+    if (!FFmpegNative.init() || FFmpegNative.nativeModule === undefined) return false;
     return FFmpegNative.nativeModule.isCodecSupported(codecName);
   }
 }

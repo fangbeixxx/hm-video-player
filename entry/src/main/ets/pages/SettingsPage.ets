@@ -28,6 +28,7 @@ struct SettingsPage {
   @State showLanguageDialog: boolean = false;
 
   @StorageLink('appLanguage') appLanguage: AppLanguage = AppLanguage.SYSTEM;
+  @State languageLabel: string = 'System';
   private historyService: PlayHistoryService = PlayHistoryService.getInstance();
   private settingsService: SettingsService = SettingsService.getInstance();
   private loc: LocalizationManager = LocalizationManager.getInstance();
@@ -40,6 +41,7 @@ struct SettingsPage {
       const savedLang: AppLanguage = await this.settingsService.getLanguage();
       this.loc.setLanguage(savedLang);
       AppStorage.set('appLanguage', savedLang);
+      this.languageLabel = this.loc.getLanguageLabel();
     } catch (e) {
       // use default SYSTEM
     }
@@ -99,15 +101,6 @@ struct SettingsPage {
           .fontColor('#333333')
           .margin({ left: 12 })
           .layoutWeight(1)
-
-        Image($r('app.media.ic_search'))
-          .width(22)
-          .height(22)
-          .fillColor('#666666')
-          .padding(6)
-          .onClick(() => {
-            router.pushUrl({ url: 'pages/SearchPage' });
-          })
       }
       .width('100%')
       .height(56)
@@ -188,7 +181,7 @@ struct SettingsPage {
           Row() {
             Text(this.loc.getString('settings_language'))
               .fontSize(15).fontColor('#333333').layoutWeight(1)
-            Text(this.loc.getLanguageLabel()).fontSize(13).fontColor('#999999')
+            Text(this.languageLabel).fontSize(13).fontColor('#999999')
             Image($r('app.media.ic_arrow_right')).width(16).height(16).fillColor('#CCCCCC').margin({ left: 4 })
           }
           .width('100%').height(52).padding({ left: 24, right: 16 }).backgroundColor('#FFFFFF')
@@ -342,7 +335,7 @@ struct SettingsPage {
                   }
                 }
                 .width('100%').height(48).padding({ left: 20, right: 20 })
-                .onClick(() => { this.loc.setLanguage(opt.value); AppStorage.set('appLanguage', opt.value); this.settingsService.setLanguage(opt.value); this.showLanguageDialog = false; })
+                .onClick(() => { this.loc.setLanguage(opt.value); AppStorage.set('appLanguage', opt.value); this.settingsService.setLanguage(opt.value); this.languageLabel = this.loc.getLanguageLabel(); this.showLanguageDialog = false; })
               }
             })
           }

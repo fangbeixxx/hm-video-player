@@ -19,7 +19,6 @@ import { SettingsService } from '../service/SettingsService';
 struct Index {
   @State allVideos: VideoItemObserved[] = [];
   @State recentRecords: PlayRecord[] = [];
-  @State favoriteVideos: VideoItemObserved[] = [];
   @State isLoading: boolean = true;
   @State selectedTab: number = 0;
   @State currentSort: SortType = SortType.DATE_MODIFIED;
@@ -42,6 +41,11 @@ struct Index {
     }
     await this.initSafeArea();
     await this.requestMediaPermission();
+  }
+
+  async onPageShow(): Promise<void> {
+    // Refresh recent records when returning from other pages
+    await this.loadRecentRecords();
   }
 
   /**
@@ -91,12 +95,6 @@ struct Index {
     }
   }
 
-  async onShow(): Promise<void> {
-    // 页面显示时刷新最近播放和收藏
-    await this.loadRecentRecords();
-    await this.loadFavorites();
-  }
-
   private async loadData(): Promise<void> {
     console.info('[Index] loadData start');
     this.isLoading = true;
@@ -120,19 +118,6 @@ struct Index {
       this.recentRecords = await this.historyService.getHistory(20);
     } catch (e) {
       console.error('Load history failed: ' + JSON.stringify(e));
-    }
-  }
-
-  private async loadFavorites(): Promise<void> {
-    try {
-      const favIds = await this.historyService.getFavorites();
-      // Match favorite IDs against all videos
-      const all = await this.scanner.scanVideos();
-      this.favoriteVideos = all
-        .filter(v => favIds.indexOf(v.id) >= 0)
-        .map(v => new VideoItemObserved(v));
-    } catch (e) {
-      console.error('Load favorites failed: ' + JSON.stringify(e));
     }
   }
 
@@ -341,45 +326,6 @@ struct Index {
     .onClick(() => this.continuePlay(record))
   }
 
-  @Builder
-  FavoritesTab() {
-    Column() {
-      if (this.favoriteVideos.length === 0) {
-        Column({ space: 12 }) {
-          Image($r('app.media.ic_favorite_border'))
-            .width(80)
-            .height(80)
-            .opacity(0.3)
-          Text(this.loc.getString('index_no_favorites'))
-            .fontSize(16)
-            .fontColor('#999999')
-          Text(this.loc.getString('index_favorites_hint'))
-            .fontSize(13)
-            .fontColor('#CCCCCC')
-        }
-        .width('100%')
-        .height('100%')
-        .justifyContent(FlexAlign.Center)
-      } else {
-        List({ space: 8 }) {
-          ForEach(this.favoriteVideos, (video: VideoItemObserved) => {
-            ListItem() {
-              VideoCard({
-                video: video,
-                showDate: true,
-                onClicked: (v: VideoItem) => this.goToPlayer(v)
-              })
-            }
-          }, (video: VideoItemObserved) => video.id)
-        }
-        .padding({ left: 16, right: 16, top: 8, bottom: 16 })
-        .scrollBar(BarState.Off)
-      }
-    }
-    .width('100%')
-    .height('100%')
-  }
-
   // ========== 主布局 ==========
 
   build() {
@@ -399,12 +345,14 @@ struct Index {
 
         Blank()
 
-        // 在线视频按钮
-        Text(this.loc.getString('app_online'))
+        // 在线影视按钮
+        Text(this.loc.getString('index_online_btn'))
           .fontSize(14)
-          .fontColor('#FF4081')
-          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-          .border({ width: 1, color: '#FF4081', radius: 4 })
+          .fontColor('#FFFFFF')
+          .fontWeight(FontWeight.Medium)
+          .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+          .backgroundColor('#FF4081')
+          .borderRadius(4)
           .onClick(() => {
             router.pushUrl({ url: 'pages/OnlinePage' });
           })
@@ -457,11 +405,6 @@ struct Index {
           this.RecentTab()
         }
         .tabBar(this.TabItem(this.loc.getString('index_recent'), 1))
-
-        TabContent() {
-          this.FavoritesTab()
-        }
-        .tabBar(this.TabItem(this.loc.getString('index_favorites'), 2))
       }
       .onChange((index: number) => {
         this.selectedTab = index;
@@ -485,10 +428,10 @@ struct Index {
         .fontColor(this.selectedTab === index ? '#FF4081' : '#999999')
 
       // 选中指示线
-      Divider()
+      Row()
         .width(24)
         .height(2)
-        .color(this.selectedTab === index ? '#FF4081' : 'transparent')
+        .backgroundColor(this.selectedTab === index ? '#FF4081' : 'transparent')
         .borderRadius(1)
     }
     .width('100%')
