@@ -1,10 +1,12 @@
 import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
+import { AppLanguage } from '../common/Enums';
 
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(0x0000, 'testTag', '%{public}s', 'Ability onCreate');
+    AppStorage.setOrCreate('appLanguage', AppLanguage.SYSTEM);
   }
 
   onDestroy(): void {
@@ -16,7 +18,6 @@ export default class EntryAbility extends UIAbility {
 
     // 设置全屏沉浸式
     windowStage.getMainWindow().then((win) => {
-      // 设置状态栏和导航栏沉浸式
       const sysBarProps: window.SystemBarProperties = {
         statusBarColor: '#000000',
         navigationBarColor: '#000000',
@@ -24,7 +25,6 @@ export default class EntryAbility extends UIAbility {
         navigationBarContentColor: '#FFFFFF'
       };
       win.setWindowSystemBarProperties(sysBarProps);
-
       // 平板默认全屏
       win.setWindowLayoutFullScreen(true);
     });
@@ -48,5 +48,8 @@ export default class EntryAbility extends UIAbility {
 
   onBackground(): void {
     hilog.info(0x0000, 'testTag', '%{public}s', 'Ability onBackground');
+    // PiP is triggered by the player view when user presses PiP button;
+    // the system automatically enters PiP mode when supportPiPMode is enabled
+    // and the app goes to background while video is playing.
   }
 }

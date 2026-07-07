@@ -1,6 +1,6 @@
 import { preferences } from '@kit.ArkData';
 import { Constants } from '../common/Constants';
-import { PlaybackSpeed, ScreenOrientation } from '../common/Enums';
+import { PlaybackSpeed, ScreenOrientation, AppLanguage } from '../common/Enums';
 
 const KEY_SHOW_SUBTITLE: string = 'show_subtitle';
 const KEY_AUTO_PLAY_NEXT: string = 'auto_play_next';
@@ -9,6 +9,7 @@ const KEY_BACKGROUND_PLAY: string = 'background_play';
 const KEY_WIFI_ONLY: string = 'wifi_only';
 const KEY_ORIENTATION: string = 'orientation';
 const KEY_DEFAULT_SPEED: string = 'default_speed';
+const KEY_LANGUAGE: string = 'app_language';
 
 export class SettingsService {
   private static instance: SettingsService | null = null;
@@ -121,6 +122,23 @@ export class SettingsService {
   async setWifiOnly(value: boolean): Promise<void> {
     const prefs = await this.getPrefs();
     await prefs.put(KEY_WIFI_ONLY, value);
+    await prefs.flush();
+  }
+
+  // ==================== 语言 ====================
+
+  async getLanguage(): Promise<AppLanguage> {
+    const prefs = await this.getPrefs();
+    const val: string = await prefs.get(KEY_LANGUAGE, AppLanguage.SYSTEM) as string;
+    if (val === AppLanguage.ZH_CN || val === AppLanguage.EN_US || val === AppLanguage.SYSTEM) {
+      return val as AppLanguage;
+    }
+    return AppLanguage.SYSTEM;
+  }
+
+  async setLanguage(value: AppLanguage): Promise<void> {
+    const prefs = await this.getPrefs();
+    await prefs.put(KEY_LANGUAGE, value);
     await prefs.flush();
   }
 }

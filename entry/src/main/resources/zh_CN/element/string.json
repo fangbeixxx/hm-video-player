@@ -1,0 +1,24 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "HarmonyOS 平板视频播放器"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "视频播放器主界面"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "视频播放器"
+    },
+    {
+      "name": "permission_read_media_reason",
+      "value": "读取本地视频文件用于播放"
+    },
+    {
+      "name": "permission_internet_reason",
+      "value": "播放在线视频内容"
+    }
+  ]
+}

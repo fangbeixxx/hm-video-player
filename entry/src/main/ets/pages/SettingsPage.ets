@@ -2,7 +2,8 @@ import { router } from '@kit.ArkUI';
 import { window } from '@kit.ArkUI';
 import { PlayHistoryService } from '../service/PlayHistoryService';
 import { SettingsService } from '../service/SettingsService';
-import { PlaybackSpeed, ScreenOrientation } from '../common/Enums';
+import { PlaybackSpeed, ScreenOrientation, AppLanguage } from '../common/Enums';
+import { LocalizationManager } from '../utils/LocalizationManager';
 
 @Entry
 @Component
@@ -17,12 +18,22 @@ struct SettingsPage {
   @State historyCount: number = 0;
   @State safeAreaTop: number = 0;
 
+  @StorageLink('appLanguage') appLanguage: AppLanguage = AppLanguage.SYSTEM;
   private historyService: PlayHistoryService = PlayHistoryService.getInstance();
   private settingsService: SettingsService = SettingsService.getInstance();
+  private loc: LocalizationManager = LocalizationManager.getInstance();
 
   async aboutToAppear(): Promise<void> {
     await this.initSafeArea();
     await this.loadSettings();
+    // Load persisted language
+    try {
+      const savedLang: AppLanguage = await this.settingsService.getLanguage();
+      this.loc.setLanguage(savedLang);
+      AppStorage.set('appLanguage', savedLang);
+    } catch (e) {
+      // use default SYSTEM
+    }
     try {
       const history = await this.historyService.getHistory();
       this.historyCount = history.length;
@@ -72,11 +83,21 @@ struct SettingsPage {
           .fillColor('#333333')
           .onClick(() => router.back())
 
-        Text('Settings')
+        Text(this.loc.getString('settings_title'))
           .fontSize(20)
           .fontWeight(FontWeight.Bold)
           .fontColor('#333333')
           .margin({ left: 12 })
+          .layoutWeight(1)
+
+        Image($r('app.media.ic_search'))
+          .width(22)
+          .height(22)
+          .fillColor('#666666')
+          .padding(6)
+          .onClick(() => {
+            router.pushUrl({ url: 'pages/SearchPage' });
+          })
       }
       .width('100%')
       .height(56)
@@ -85,80 +106,134 @@ struct SettingsPage {
 
       List({ space: 0 }) {
         ListItem() {
-          this.SectionHeader('Playback')
+          this.SectionHeader(this.loc.getString('settings_playback'))
         }
 
         ListItem() {
-          this.SwitchItem('Auto play next', this.autoPlayNext, async (val: boolean) => {
+          this.SwitchItem(this.loc.getString('settings_auto_play_next'), this.autoPlayNext, async (val: boolean) => {
             this.autoPlayNext = val;
             await this.settingsService.setAutoPlayNext(val);
           })
         }
 
         ListItem() {
-          this.SwitchItem('Hardware acceleration', this.hwAcceleration, async (val: boolean) => {
+          this.SwitchItem(this.loc.getString('settings_hw_accel'), this.hwAcceleration, async (val: boolean) => {
             this.hwAcceleration = val;
             await this.settingsService.setHwAcceleration(val);
           })
         }
 
         ListItem() {
-          this.SwitchItem('Background play', this.backgroundPlay, async (val: boolean) => {
+          this.SwitchItem(this.loc.getString('settings_background_play'), this.backgroundPlay, async (val: boolean) => {
             this.backgroundPlay = val;
             await this.settingsService.setBackgroundPlay(val);
           })
         }
 
         ListItem() {
-          this.SelectItem('Default speed', this.getSpeedLabel(this.defaultSpeed), () => {
-            this.cycleSpeed();
-          })
+          Row() {
+            Text(this.loc.getString('settings_default_speed'))
+              .fontSize(15)
+              .fontColor('#333333')
+              .layoutWeight(1)
+            Text(this.getSpeedLabel(this.defaultSpeed))
+              .fontSize(13)
+              .fontColor('#999999')
+            Image($r('app.media.ic_arrow_right'))
+              .width(16)
+              .height(16)
+              .fillColor('#CCCCCC')
+              .margin({ left: 4 })
+          }
+          .width('100%')
+          .height(52)
+          .padding({ left: 24, right: 16 })
+          .backgroundColor('#FFFFFF')
+          .onClick(() => { this.cycleSpeed(); })
         }
 
         ListItem() {
-          this.SectionHeader('Display')
+          this.SectionHeader(this.loc.getString('settings_display'))
         }
 
         ListItem() {
-          this.SelectItem('Orientation', this.getOrientationLabel(this.orientation), () => {
-            this.cycleOrientation();
-          })
+          Row() {
+            Text(this.loc.getString('settings_orientation'))
+              .fontSize(15)
+              .fontColor('#333333')
+              .layoutWeight(1)
+            Text(this.getOrientationLabel(this.orientation))
+              .fontSize(13)
+              .fontColor('#999999')
+            Image($r('app.media.ic_arrow_right'))
+              .width(16)
+              .height(16)
+              .fillColor('#CCCCCC')
+              .margin({ left: 4 })
+          }
+          .width('100%')
+          .height(52)
+          .padding({ left: 24, right: 16 })
+          .backgroundColor('#FFFFFF')
+          .onClick(() => { this.cycleOrientation(); })
         }
 
         ListItem() {
-          this.SwitchItem('Show subtitles', this.showSubtitle, async (val: boolean) => {
+          Row() {
+            Text(this.loc.getString('settings_language'))
+              .fontSize(15)
+              .fontColor('#333333')
+              .layoutWeight(1)
+            Text(this.loc.getLanguageLabel())
+              .fontSize(13)
+              .fontColor('#999999')
+            Image($r('app.media.ic_arrow_right'))
+              .width(16)
+              .height(16)
+              .fillColor('#CCCCCC')
+              .margin({ left: 4 })
+          }
+          .width('100%')
+          .height(52)
+          .padding({ left: 24, right: 16 })
+          .backgroundColor('#FFFFFF')
+          .onClick(() => { this.cycleLanguage(); })
+        }
+
+        ListItem() {
+          this.SwitchItem(this.loc.getString('settings_show_subtitles'), this.showSubtitle, async (val: boolean) => {
             this.showSubtitle = val;
             await this.settingsService.setShowSubtitle(val);
           })
         }
 
         ListItem() {
-          this.SectionHeader('Network')
+          this.SectionHeader(this.loc.getString('settings_network'))
         }
 
         ListItem() {
-          this.SwitchItem('Wi-Fi only', this.wifiOnly, async (val: boolean) => {
+          this.SwitchItem(this.loc.getString('settings_wifi_only'), this.wifiOnly, async (val: boolean) => {
             this.wifiOnly = val;
             await this.settingsService.setWifiOnly(val);
           })
         }
 
         ListItem() {
-          this.SectionHeader('Data')
+          this.SectionHeader(this.loc.getString('settings_data'))
         }
 
         ListItem() {
           Row() {
-            Text('Playback history')
+            Text(this.loc.getString('settings_history'))
               .fontSize(15)
               .fontColor('#333333')
               .layoutWeight(1)
 
-            Text(`${this.historyCount} records`)
+            Text(`${this.historyCount} ${this.loc.getString('settings_records')}`)
               .fontSize(13)
               .fontColor('#999999')
 
-            Text('Clear')
+            Text(this.loc.getString('settings_clear'))
               .fontSize(14)
               .fontColor('#FF4081')
               .margin({ left: 12 })
@@ -171,12 +246,12 @@ struct SettingsPage {
         }
 
         ListItem() {
-          this.SectionHeader('About')
+          this.SectionHeader(this.loc.getString('settings_about'))
         }
 
         ListItem() {
           Row() {
-            Text('Version')
+            Text(this.loc.getString('settings_version'))
               .fontSize(15)
               .fontColor('#333333')
               .layoutWeight(1)
@@ -276,9 +351,9 @@ struct SettingsPage {
 
   private getOrientationLabel(orientation: ScreenOrientation): string {
     switch (orientation) {
-      case ScreenOrientation.LANDSCAPE: return 'Landscape';
-      case ScreenOrientation.PORTRAIT: return 'Portrait';
-      default: return 'Auto';
+      case ScreenOrientation.LANDSCAPE: return this.loc.getString('orient_landscape');
+      case ScreenOrientation.PORTRAIT: return this.loc.getString('orient_portrait');
+      default: return this.loc.getString('orient_auto');
     }
   }
 
@@ -289,5 +364,16 @@ struct SettingsPage {
     const idx = orientations.indexOf(this.orientation);
     this.orientation = orientations[(idx + 1) % orientations.length];
     await this.settingsService.setOrientation(this.orientation);
+  }
+
+  private async cycleLanguage(): Promise<void> {
+    const langs: AppLanguage[] = [
+      AppLanguage.SYSTEM, AppLanguage.ZH_CN, AppLanguage.EN_US
+    ];
+    const currentIdx: number = langs.indexOf(this.loc.getLanguage());
+    const nextLang: AppLanguage = langs[(currentIdx + 1) % langs.length];
+    this.loc.setLanguage(nextLang);
+    AppStorage.set('appLanguage', nextLang);
+    await this.settingsService.setLanguage(nextLang);
   }
 }

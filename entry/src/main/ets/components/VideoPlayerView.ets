@@ -19,12 +19,14 @@ import { VideoPlayerManager, PlaybackEngine } from '../service/VideoPlayerManage
 import { ControlPanel } from './ControlPanel';
 import { ErrorToast } from './ErrorDialog';
 import { DanmakuLayer } from './DanmakuLayer';
-import { PlayerState, PlaybackSpeed } from '../common/Enums';
+import { PlayerState, PlaybackSpeed, AppLanguage } from '../common/Enums';
 import { PlayerError, PlayerErrorCode, createPlayerError } from '../common/PlayerError';
 import { PlayHistoryService } from '../service/PlayHistoryService';
 import { SettingsService } from '../service/SettingsService';
 import { QualityOption } from '../model/OnlineMedia';
+import { LocalizationManager } from '../utils/LocalizationManager';
 import { DanmakuEngine } from '../utils/DanmakuEngine';
+import { PiPManager, PiPState } from '../service/PiPManager';
 
 interface ErrorWithCode extends Error {
   code: number;
@@ -63,6 +65,9 @@ export struct VideoPlayerView {
   onNext: () => void = () => {};
   onPrevious: () => void = () => {};
 
+  @StorageLink('appLanguage') appLanguage: AppLanguage = AppLanguage.SYSTEM;
+  private loc: LocalizationManager = LocalizationManager.getInstance();
+
   @State playerManager: VideoPlayerManager = new VideoPlayerManager();
   @State playerState: PlayerState = PlayerState.IDLE;
   @State currentTime: number = 0;
@@ -84,9 +89,12 @@ export struct VideoPlayerView {
   @State screenBrightness: number = 0.5;
   @State playbackVolume: number = 1.0;
   @State danmakuEnabled: boolean = false;
+  @State isPiPActive: boolean = false;
 
   // Danmaku
   private danmakuEngine: DanmakuEngine = new DanmakuEngine();
+  // PiP
+  private pipManager: PiPManager = PiPManager.getInstance();
 
   private saveTimerId: number = -1;
   private progressTimerId: number = -1;
@@ -114,6 +122,12 @@ export struct VideoPlayerView {
     this.hasAppliedResumeSeek = false;
     this.subtitlesEnabled = await SettingsService.getInstance().getShowSubtitle();
     this.useAvPlayerEngine = await SettingsService.getInstance().getHwAcceleration();
+    this.pipManager.setContext(getContext(this) as common.UIAbilityContext);
+    this.pipManager.setCallbacks({
+      onStateChange: (state: PiPState) => {
+        this.isPiPActive = state === PiPState.ACTIVE;
+      }
+    });
     await this.loadExternalSubtitles();
     await this.initPlayerManager();
     await this.startPlaybackIfReady();
@@ -133,6 +147,11 @@ export struct VideoPlayerView {
     this.playbackStarting = false;
     this.isBuffering = false;
     this.subtitleText = '';
+    // Exit PiP if active
+    if (this.isPiPActive) {
+      this.pipManager.exitPiP();
+      this.isPiPActive = false;
+    }
     try {
       if (this.engineType === 'AVPlayer') {
         await this.playerManager.release();
@@ -510,7 +529,7 @@ export struct VideoPlayerView {
       this.ijkPlayer.reset();
       await this.startPlaybackIfReady();
     } catch (error) {
-      this.handleError(createPlayerError(PlayerErrorCode.UNKNOWN, 'Retry failed.'));
+      this.handleError(createPlayerError(PlayerErrorCode.UNKNOWN, this.loc.getString('error_retry_failed')));
     }
   }
 
@@ -526,6 +545,7 @@ export struct VideoPlayerView {
         this.playerState = PlayerState.PLAYING;
         this.isPlaying = true;
       }
+      this.pipManager.updatePlayState(this.isPlaying, this.videoTitle);
       return;
     }
 
@@ -534,11 +554,13 @@ export struct VideoPlayerView {
       this.playerState = PlayerState.PAUSED;
       this.isPlaying = false;
       this.isBuffering = false;
+      this.pipManager.updatePlayState(false, this.videoTitle);
       return;
     }
     this.ijkPlayer.start();
     this.playerState = PlayerState.PLAYING;
     this.isPlaying = true;
+    this.pipManager.updatePlayState(true, this.videoTitle);
   }
 
   private async saveProgress(): Promise<void> {
@@ -935,6 +957,20 @@ export struct VideoPlayerView {
   }
 
   /**
+   * Toggle Picture-in-Picture mode
+   */
+  async togglePiP(): Promise<void> {
+    if (this.isPiPActive) {
+      await this.pipManager.exitPiP();
+    } else {
+      const entered = await this.pipManager.enterPiP(this.videoTitle, this.isPlaying);
+      if (entered) {
+        this.isPiPActive = true;
+      }
+    }
+  }
+
+  /**
    * 设置屏幕亮度
    */
   private setScreenBrightness(brightness: number): void {
@@ -1002,7 +1038,7 @@ export struct VideoPlayerView {
         currentSpeed: this.currentSpeed,
         isMuted: this.isMuted,
         isBuffering: this.isBuffering,
-        brightness: this.screenBrightness,
+        panelBrightness: this.screenBrightness,
         volume: this.playbackVolume,
         subtitleDelayMs: this.subtitleDelayMs,
         onPlayPause: async () => {
@@ -1091,6 +1127,10 @@ export struct VideoPlayerView {
         onSendDanmaku: (text: string) => {
           this.sendDanmaku(text);
         },
+        isPiPActive: this.isPiPActive,
+        onTogglePiP: () => {
+          this.togglePiP();
+        },
         onPrevious: () => this.onPrevious(),
         onNext: () => this.onNext(),
         onBack: () => this.onBack(),
@@ -1151,7 +1191,7 @@ export struct VideoPlayerView {
             .fontColor($r('sys.color.multi_color_10'))
         }
 
-        Text(this.currentError?.title || 'Playback failed')
+        Text(this.currentError?.title || this.loc.getString('error_playback_failed'))
           .fontSize(20)
           .fontWeight(FontWeight.Bold)
           .fontColor('#333333')
@@ -1161,7 +1201,7 @@ export struct VideoPlayerView {
       .padding({ top: 24, bottom: 16 })
 
       Row() {
-        Text(`Error code: ${this.currentError?.code || 0}`)
+        Text(`${this.loc.getString('error_code')}: ${this.currentError?.code || 0}`)
           .fontSize(11)
           .fontColor('#999999')
           .padding({ left: 8, right: 8, top: 3, bottom: 3 })
@@ -1175,7 +1215,7 @@ export struct VideoPlayerView {
       Divider().color('#F0F0F0').height(1)
 
       Column({ space: 8 }) {
-        Text(this.currentError?.message || 'Unknown playback error.')
+        Text(this.currentError?.message || this.loc.getString('error_unknown'))
           .fontSize(15)
           .fontColor('#555555')
           .textAlign(TextAlign.Center)
@@ -1186,7 +1226,7 @@ export struct VideoPlayerView {
       Divider().color('#F0F0F0').height(1)
 
       Row({ space: 0 }) {
-        Button('Close')
+        Button(this.loc.getString('error_close'))
           .fontSize(15)
           .fontColor('#999999')
           .backgroundColor($r('sys.color.comp_background_list_card'))
@@ -1201,7 +1241,7 @@ export struct VideoPlayerView {
         if (this.currentError?.retryable) {
           Divider().vertical(true).color('#F0F0F0').height(32)
 
-          Button('Retry')
+          Button(this.loc.getString('error_retry'))
             .fontSize(15)
             .fontColor('#FF4081')
             .fontWeight(FontWeight.Medium)

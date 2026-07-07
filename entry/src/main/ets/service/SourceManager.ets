@@ -167,7 +167,7 @@ export class SourceManager {
 
     for (const source of movieSources) {
       const content = await this.fetchSourceContent(source);
-      if (content && content.length > 0 && 'title' in content[0]) {
+      if (content && content.length > 0) {
         const videos = content as OnlineVideoItem[];
         const lowerKw = keyword.toLowerCase();
         const matched = videos.filter(v => v.title.toLowerCase().includes(lowerKw));

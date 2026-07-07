@@ -3,6 +3,8 @@ import { window } from '@kit.ArkUI';
 import { VideoPlayerView } from '../components/VideoPlayerView';
 import { PlayHistoryService } from '../service/PlayHistoryService';
 import { PlaylistItem } from '../model/VideoItem';
+import { AppLanguage } from '../common/Enums';
+import { LocalizationManager } from '../utils/LocalizationManager';
 
 interface PlayerRouteParams {
   videoId?: string;
@@ -26,6 +28,9 @@ struct PlayerPage {
   @State playlist: PlaylistItem[] = [];
   @State playlistIndex: number = 0;
 
+  @StorageLink('appLanguage') appLanguage: AppLanguage = AppLanguage.SYSTEM;
+  private loc: LocalizationManager = LocalizationManager.getInstance();
+
   async aboutToAppear(): Promise<void> {
     this.playerReady = false;
     const params = router.getParams() as PlayerRouteParams;
@@ -33,7 +38,7 @@ struct PlayerPage {
     if (params) {
       this.videoId = params.videoId || '';
       this.videoPath = params.videoPath || '';
-      this.videoTitle = params.videoTitle || 'Unknown video';
+      this.videoTitle = params.videoTitle || this.loc.getString('app_unknown_video');
       this.seekTo = params.seekTo || 0;
       this.playlist = params.playlist || [];
       this.playlistIndex = params.playlistIndex || 0;

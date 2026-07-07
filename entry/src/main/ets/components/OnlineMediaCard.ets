@@ -1,4 +1,6 @@
 import { OnlineVideoItem, IptvChannel } from '../model/OnlineMedia';
+import { AppLanguage } from '../common/Enums';
+import { LocalizationManager } from '../utils/LocalizationManager';
 
 /**
  * 在线视频卡片组件（影视）
@@ -6,6 +8,9 @@ import { OnlineVideoItem, IptvChannel } from '../model/OnlineMedia';
 @Component
 export struct MovieCard {
   @Prop item: OnlineVideoItem;
+
+  @StorageLink('appLanguage') appLanguage: AppLanguage = AppLanguage.SYSTEM;
+  private loc: LocalizationManager = LocalizationManager.getInstance();
 
   onClicked: (item: OnlineVideoItem) => void = () => {};
   onDownload: (item: OnlineVideoItem) => void = () => {};
@@ -55,7 +60,7 @@ export struct MovieCard {
               .fontColor('#999999')
           }
           if (this.item.rating) {
-            Text('Rating: ' + this.item.rating)
+            Text(this.loc.getString('card_rating') + ': ' + this.item.rating)
               .fontSize(12)
               .fontColor('#FF9800')
           }
@@ -80,7 +85,7 @@ export struct MovieCard {
       .justifyContent(FlexAlign.Center)
 
       // Download action
-      Text('DL')
+      Text(this.loc.getString('card_dl'))
         .fontSize(11)
         .fontColor('#FF4081')
         .padding({ left: 8, right: 8, top: 4, bottom: 4 })
@@ -107,8 +112,8 @@ export struct MovieCard {
   private formatDuration(seconds: number): string {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
-    if (h > 0) return `${h}h${m}m`;
-    return `${m}m`;
+    if (h > 0) return `${h}${this.loc.getString('time_h')}${m}${this.loc.getString('time_m')}`;
+    return `${m}${this.loc.getString('time_m')}`;
   }
 }
 

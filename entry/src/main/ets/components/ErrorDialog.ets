@@ -1,4 +1,6 @@
 import { PlayerError } from '../common/PlayerError';
+import { AppLanguage } from '../common/Enums';
+import { LocalizationManager } from '../utils/LocalizationManager';
 
 @Component
 export struct ErrorDialog {
@@ -7,6 +9,9 @@ export struct ErrorDialog {
 
   onRetry: () => void = () => {};
   onDismiss: () => void = () => {};
+
+  @StorageLink('appLanguage') appLanguage: AppLanguage = AppLanguage.SYSTEM;
+  private loc: LocalizationManager = LocalizationManager.getInstance();
 
   @State showDetail: boolean = false;
 
@@ -31,7 +36,7 @@ export struct ErrorDialog {
                 .fontColor('#FF9800')
             }
 
-            Text(this.error?.title || 'Playback failed')
+            Text(this.error?.title || this.loc.getString('error_playback_failed'))
               .fontSize(20)
               .fontWeight(FontWeight.Bold)
               .fontColor('#333333')
@@ -41,7 +46,7 @@ export struct ErrorDialog {
           .padding({ top: 24, bottom: 16 })
 
           Row() {
-            Text(`Error code: ${this.error?.code || 0}`)
+            Text(`${this.loc.getString('error_code')}: ${this.error?.code || 0}`)
               .fontSize(11)
               .fontColor('#999999')
               .padding({ left: 8, right: 8, top: 3, bottom: 3 })
@@ -57,7 +62,7 @@ export struct ErrorDialog {
             .height(1)
 
           Column({ space: 8 }) {
-            Text(this.error?.message || 'Unknown playback error.')
+            Text(this.error?.message || this.loc.getString('error_unknown'))
               .fontSize(15)
               .fontColor('#555555')
               .textAlign(TextAlign.Center)
@@ -74,7 +79,7 @@ export struct ErrorDialog {
 
             if (this.error?.detail) {
               Column() {
-                Text(this.showDetail ? 'Hide detail' : 'Show detail')
+                Text(this.showDetail ? this.loc.getString('error_hide_detail') : this.loc.getString('error_show_detail'))
                   .fontSize(12)
                   .fontColor('#2196F3')
                   .onClick(() => {
@@ -105,7 +110,7 @@ export struct ErrorDialog {
             .height(1)
 
           Row({ space: 0 }) {
-            Button('Close')
+            Button(this.loc.getString('error_close'))
               .fontSize(15)
               .fontColor('#999999')
               .backgroundColor('#FFFFFF')
@@ -124,7 +129,7 @@ export struct ErrorDialog {
                 .color('#F0F0F0')
                 .height(32)
 
-              Button('Retry')
+              Button(this.loc.getString('error_retry'))
                 .fontSize(15)
                 .fontColor('#FF4081')
                 .fontWeight(FontWeight.Medium)
@@ -168,6 +173,9 @@ export struct ErrorToast {
   onRetry: () => void = () => {};
   onDismiss: () => void = () => {};
 
+  @StorageLink('appLanguage') appLanguage: AppLanguage = AppLanguage.SYSTEM;
+  private loc: LocalizationManager = LocalizationManager.getInstance();
+
   build() {
     Row({ space: 8 }) {
       if (this.visible) {
@@ -183,7 +191,7 @@ export struct ErrorToast {
           .maxLines(2)
 
         if (this.retryable) {
-          Text('Retry')
+          Text(this.loc.getString('error_retry'))
             .fontSize(13)
             .fontColor('#FFD740')
             .padding({ left: 8, right: 8, top: 4, bottom: 4 })

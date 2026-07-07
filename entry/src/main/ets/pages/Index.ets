@@ -5,9 +5,11 @@ import { MediaScanner } from '../service/MediaScanner';
 import { PlayHistoryService } from '../service/PlayHistoryService';
 import { VideoCard, VideoItemObserved } from '../components/VideoCard';
 import { VideoItem, PlayRecord, PlaylistItem } from '../model/VideoItem';
-import { SortType } from '../common/Enums';
+import { SortType, AppLanguage } from '../common/Enums';
+import { LocalizationManager } from '../utils/LocalizationManager';
 import { TimeUtils } from '../utils/TimeUtils';
 import { FileUtils } from '../utils/FileUtils';
+import { SettingsService } from '../service/SettingsService';
 
 /**
  * 首页 - 视频列表
@@ -24,10 +26,20 @@ struct Index {
   @State searchKeyword: string = '';
   @State safeAreaTop: number = 0; // 安全区域顶部高度
 
+  @StorageLink('appLanguage') appLanguage: AppLanguage = AppLanguage.SYSTEM;
+  private loc: LocalizationManager = LocalizationManager.getInstance();
   private scanner: MediaScanner = MediaScanner.getInstance();
   private historyService: PlayHistoryService = PlayHistoryService.getInstance();
 
   async aboutToAppear(): Promise<void> {
+    // Load persisted language
+    try {
+      const savedLang: AppLanguage = await SettingsService.getInstance().getLanguage();
+      this.loc.setLanguage(savedLang);
+      AppStorage.set('appLanguage', savedLang);
+    } catch (e) {
+      // use default SYSTEM
+    }
     await this.initSafeArea();
     await this.requestMediaPermission();
   }
@@ -191,7 +203,7 @@ struct Index {
           LoadingProgress()
             .width(48)
             .height(48)
-          Text('正在扫描视频...')
+          Text(this.loc.getString('index_scanning'))
             .fontSize(14)
             .fontColor('#999999')
             .margin({ top: 12 })
@@ -205,10 +217,10 @@ struct Index {
             .width(120)
             .height(120)
             .opacity(0.5)
-          Text('暂未发现视频文件')
+          Text(this.loc.getString('index_no_videos'))
             .fontSize(16)
             .fontColor('#999999')
-          Button('重新扫描')
+          Button(this.loc.getString('index_rescan'))
             .fontSize(14)
             .onClick(() => this.refresh())
         }
@@ -240,10 +252,10 @@ struct Index {
     Column() {
       if (this.recentRecords.length === 0) {
         Column({ space: 12 }) {
-          Text('暂无播放记录')
+          Text(this.loc.getString('index_no_history'))
             .fontSize(16)
             .fontColor('#999999')
-          Text('播放视频后会自动记录')
+          Text(this.loc.getString('index_history_hint'))
             .fontSize(13)
             .fontColor('#CCCCCC')
         }
@@ -303,7 +315,7 @@ struct Index {
           .maxLines(2)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-        Text(`播放至 ${TimeUtils.formatTime(record.lastPosition)} / ${TimeUtils.formatTime(record.duration)}`)
+        Text(`${this.loc.getString('index_played_to')} ${TimeUtils.formatTime(record.lastPosition)} / ${TimeUtils.formatTime(record.duration)}`)
           .fontSize(12)
           .fontColor('#999999')
 
@@ -338,10 +350,10 @@ struct Index {
             .width(80)
             .height(80)
             .opacity(0.3)
-          Text('No favorites yet')
+          Text(this.loc.getString('index_no_favorites'))
             .fontSize(16)
             .fontColor('#999999')
-          Text('Long-press a video to add to favorites')
+          Text(this.loc.getString('index_favorites_hint'))
             .fontSize(13)
             .fontColor('#CCCCCC')
         }
@@ -380,7 +392,7 @@ struct Index {
 
       // 顶部导航栏
       Row() {
-        Text('视频播放器')
+        Text(this.loc.getString('app_title'))
           .fontSize(22)
           .fontWeight(FontWeight.Bold)
           .fontColor('#333333')
@@ -388,7 +400,7 @@ struct Index {
         Blank()
 
         // 在线视频按钮
-        Text('Online')
+        Text(this.loc.getString('app_online'))
           .fontSize(14)
           .fontColor('#FF4081')
           .padding({ left: 8, right: 8, top: 4, bottom: 4 })
@@ -428,17 +440,17 @@ struct Index {
         TabContent() {
           this.AllVideosTab()
         }
-        .tabBar(this.TabItem('本地视频', this.selectedTab === 0))
+        .tabBar(this.TabItem(this.loc.getString('index_local_videos'), this.selectedTab === 0))
 
         TabContent() {
           this.RecentTab()
         }
-        .tabBar(this.TabItem('最近播放', this.selectedTab === 1))
+        .tabBar(this.TabItem(this.loc.getString('index_recent'), this.selectedTab === 1))
 
         TabContent() {
           this.FavoritesTab()
         }
-        .tabBar(this.TabItem('我的收藏', this.selectedTab === 2))
+        .tabBar(this.TabItem(this.loc.getString('index_favorites'), this.selectedTab === 2))
       }
       .onChange((index: number) => {
         this.selectedTab = index;

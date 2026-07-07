@@ -74,3 +74,12 @@ export enum VideoSource {
   LOCAL = 'local',
   NETWORK = 'network'
 }
+
+/**
+ * 应用语言
+ */
+export enum AppLanguage {
+  SYSTEM = 'system',
+  ZH_CN = 'zh_CN',
+  EN_US = 'en_US'
+}

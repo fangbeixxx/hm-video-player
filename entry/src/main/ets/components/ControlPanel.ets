@@ -1,6 +1,7 @@
 import { TimeUtils } from '../utils/TimeUtils';
-import { PlayerState, PlaybackSpeed } from '../common/Enums';
+import { PlayerState, PlaybackSpeed, AppLanguage } from '../common/Enums';
 import { QualityOption } from '../model/OnlineMedia';
+import { LocalizationManager } from '../utils/LocalizationManager';
 
 @Component
 export struct ControlPanel {
@@ -14,7 +15,7 @@ export struct ControlPanel {
   @Prop title: string = '';
 
   // Gesture-related props
-  @Prop brightness: number = 0.5;
+  @Prop panelBrightness: number = 0.5;
   @Prop volume: number = 1.0;
   @Prop subtitleDelayMs: number = 0;
 
@@ -43,6 +44,12 @@ export struct ControlPanel {
   @Prop danmakuEnabled: boolean = false;
   onToggleDanmaku: () => void = () => {};
   onSendDanmaku: (text: string) => void = () => {};
+  // PiP
+  @Prop isPiPActive: boolean = false;
+  onTogglePiP: () => void = () => {};
+
+  @StorageLink('appLanguage') appLanguage: AppLanguage = AppLanguage.SYSTEM;
+  private loc: LocalizationManager = LocalizationManager.getInstance();
 
   @State showControls: boolean = true;
   @State isDragging: boolean = false;
@@ -177,7 +184,7 @@ export struct ControlPanel {
   private handlePanStart(event: GestureEvent): void {
     this.gestureStartX = event.offsetX;
     this.gestureStartY = event.offsetY;
-    this.gestureStartBrightness = this.brightness;
+    this.gestureStartBrightness = this.panelBrightness;
     this.gestureStartVolume = this.volume;
     this.gestureStartTime = this.currentTime;
     this.gestureType = 'none';
@@ -208,13 +215,13 @@ export struct ControlPanel {
       const delta = -dy / 400;
       const newBrightness = Math.max(0.01, Math.min(1.0, this.gestureStartBrightness + delta));
       this.onBrightnessChange(newBrightness);
-      this.gestureIndicatorValue = `亮度 ${Math.round(newBrightness * 100)}%`;
+      this.gestureIndicatorValue = `${this.loc.getString('cp_brightness')} ${Math.round(newBrightness * 100)}%`;
       this.showGestureIndicator();
     } else if (this.gestureType === 'volume') {
       const delta = -dy / 400;
       const newVolume = Math.max(0, Math.min(1.0, this.gestureStartVolume + delta));
       this.onVolumeChange(newVolume);
-      this.gestureIndicatorValue = `音量 ${Math.round(newVolume * 100)}%`;
+      this.gestureIndicatorValue = `${this.loc.getString('cp_volume')} ${Math.round(newVolume * 100)}%`;
       this.showGestureIndicator();
     } else if (this.gestureType === 'seek') {
       const delta = (dx / 300) * 30000;
@@ -297,7 +304,7 @@ export struct ControlPanel {
 
             if (this.gestureType === 'brightness' || this.gestureType === 'volume') {
               Progress({
-                value: this.gestureType === 'brightness' ? this.brightness * 100 : this.volume * 100,
+                value: this.gestureType === 'brightness' ? this.panelBrightness * 100 : this.volume * 100,
                 total: 100,
                 type: ProgressType.Linear
               })
@@ -358,27 +365,28 @@ export struct ControlPanel {
           // More menu dropdown
           if (this.showMoreMenu) {
             Column({ space: 0 }) {
-              this.MenuItem('Load subtitles', () => {
+              this.MenuItem(this.loc.getString('cp_load_subtitles'), () => {
                 this.showMoreMenu = false;
                 this.onLoadSubtitle();
                 this.showAndAutoHide();
               })
-              this.MenuItem(`Sub delay: ${this.subtitleDelayMs > 0 ? '+' : ''}${(this.subtitleDelayMs / 1000).toFixed(1)}s`, () => {
+              this.MenuItem(`${this.loc.getString('cp_sub_delay')}: ${this.subtitleDelayMs > 0 ? '+' : ''}${(this.subtitleDelayMs / 1000).toFixed(1)}s`, () => {
                 const delays = [0, 500, 1000, -500, -1000];
                 const idx = delays.indexOf(this.subtitleDelayMs);
                 const nextDelay = delays[(idx + 1) % delays.length];
                 this.onSubtitleDelayChange(nextDelay);
               })
               if (this.qualities.length > 0) {
-                this.MenuItem(`Quality: ${this.currentQualityLabel}`, () => {
+                this.MenuItem(`${this.loc.getString('cp_quality')}: ${this.currentQualityLabel === 'Auto' ? this.loc.getString('cp_auto') : this.currentQualityLabel}`, () => {
                   // cycle through qualities + Auto
-                  const labels: string[] = ['Auto'];
+                  const labels: string[] = [this.loc.getString('cp_auto')];
                   for (const q of this.qualities) {
                     labels.push(q.label);
                   }
-                  const currentIdx = labels.indexOf(this.currentQualityLabel);
+                  const displayLabel = this.currentQualityLabel === 'Auto' ? this.loc.getString('cp_auto') : this.currentQualityLabel;
+                  const currentIdx = labels.indexOf(displayLabel);
                   const nextLabel = labels[(currentIdx + 1) % labels.length];
-                  if (nextLabel === 'Auto') {
+                  if (nextLabel === this.loc.getString('cp_auto')) {
                     // Switch back to default URL — handled by parent
                   } else {
                     const opt = this.qualities.find(q => q.label === nextLabel);
@@ -390,12 +398,12 @@ export struct ControlPanel {
                   }
                 })
               }
-              this.MenuItem(`Danmaku: ${this.danmakuEnabled ? 'ON' : 'OFF'}`, () => {
+              this.MenuItem(`${this.loc.getString('cp_danmaku')}: ${this.danmakuEnabled ? this.loc.getString('cp_on') : this.loc.getString('cp_off')}`, () => {
                 this.onToggleDanmaku();
               })
               // Danmaku quick send button
               if (this.danmakuEnabled) {
-                this.MenuItem('Send danmaku...', () => {
+                this.MenuItem(this.loc.getString('cp_send_danmaku'), () => {
                   this.showMoreMenu = false;
                   // Send a simple pre-made danmaku for demo
                   const texts = ['666', 'Great!', 'LOL', 'Nice!', 'wow', 'Awesome'];
@@ -461,7 +469,7 @@ export struct ControlPanel {
             // Subtitle delay indicator (compact, shown when non-zero)
             if (this.subtitleDelayMs !== 0) {
               Row() {
-                Text(`Sub ${this.subtitleDelayMs > 0 ? '+' : ''}${(this.subtitleDelayMs / 1000).toFixed(1)}s`)
+                Text(`${this.loc.getString('cp_sub_delay')} ${this.subtitleDelayMs > 0 ? '+' : ''}${(this.subtitleDelayMs / 1000).toFixed(1)}s`)
                   .fontSize(10)
                   .fontColor('#FFD740')
                   .padding({ left: 8, right: 8, top: 2, bottom: 2 })
@@ -563,6 +571,18 @@ export struct ControlPanel {
                 .margin({ left: 16 })
                 .onClick(() => {
                   this.onFullscreen();
+                  this.showAndAutoHide();
+                })
+
+              // PiP toggle
+              Text(this.loc.getString('cp_pip'))
+                .fontSize(11)
+                .fontColor(this.isPiPActive ? '#FF4081' : '#FFFFFF')
+                .padding({ left: 6, right: 6, top: 3, bottom: 3 })
+                .border({ width: 1, color: this.isPiPActive ? '#FF4081' : 'rgba(255,255,255,0.5)', radius: 4 })
+                .margin({ left: 10 })
+                .onClick(() => {
+                  this.onTogglePiP();
                   this.showAndAutoHide();
                 })
             }

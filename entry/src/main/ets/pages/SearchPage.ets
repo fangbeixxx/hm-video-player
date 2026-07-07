@@ -3,6 +3,8 @@ import { window } from '@kit.ArkUI';
 import { MediaScanner } from '../service/MediaScanner';
 import { VideoCard, VideoItemObserved } from '../components/VideoCard';
 import { VideoItem } from '../model/VideoItem';
+import { AppLanguage } from '../common/Enums';
+import { LocalizationManager } from '../utils/LocalizationManager';
 
 /**
  * 搜索页面
@@ -16,7 +18,9 @@ struct SearchPage {
   @State hasSearched: boolean = false;
   @State safeAreaTop: number = 0;
 
+  @StorageLink('appLanguage') appLanguage: AppLanguage = AppLanguage.SYSTEM;
   private scanner: MediaScanner = MediaScanner.getInstance();
+  private loc: LocalizationManager = LocalizationManager.getInstance();
 
   async aboutToAppear(): Promise<void> {
     await this.initSafeArea();
@@ -81,7 +85,7 @@ struct SearchPage {
           .fillColor('#666666')
           .onClick(() => router.back())
 
-        TextInput({ placeholder: '搜索视频...', text: this.searchKeyword })
+        TextInput({ placeholder: this.loc.getString('search_placeholder'), text: this.searchKeyword })
           .layoutWeight(1)
           .height(40)
           .fontSize(15)
@@ -96,11 +100,20 @@ struct SearchPage {
           })
 
         if (this.searchKeyword.length > 0) {
-          Text('搜索')
+          Text(this.loc.getString('search_btn'))
             .fontSize(15)
             .fontColor('#FF4081')
             .onClick(() => this.doSearch())
         }
+
+        Image($r('app.media.ic_settings'))
+          .width(22)
+          .height(22)
+          .fillColor('#666666')
+          .padding(4)
+          .onClick(() => {
+            router.pushUrl({ url: 'pages/SettingsPage' });
+          })
       }
       .width('100%')
       .height(56)
@@ -122,7 +135,7 @@ struct SearchPage {
           .justifyContent(FlexAlign.Center)
         } else if (!this.hasSearched) {
           Column({ space: 12 }) {
-            Text('输入关键词搜索视频')
+            Text(this.loc.getString('search_empty'))
               .fontSize(15)
               .fontColor('#999999')
           }
@@ -131,7 +144,7 @@ struct SearchPage {
           .justifyContent(FlexAlign.Center)
         } else if (this.searchResults.length === 0) {
           Column({ space: 12 }) {
-            Text(`未找到与"${this.searchKeyword}"相关的视频`)
+            Text(this.loc.getString('search_no_result') + ` "${this.searchKeyword}"`)
               .fontSize(15)
               .fontColor('#999999')
           }
@@ -140,7 +153,7 @@ struct SearchPage {
           .justifyContent(FlexAlign.Center)
         } else {
           Column() {
-            Text(`找到 ${this.searchResults.length} 个结果`)
+            Text(`${this.loc.getString('search_result_count')}: ${this.searchResults.length}`)
               .fontSize(13)
               .fontColor('#999999')
               .padding({ left: 24, top: 12, bottom: 4 })

@@ -4,6 +4,9 @@ import { SourceManager } from '../service/SourceManager';
 import { DownloadManager } from '../service/DownloadManager';
 import { MediaSource, OnlineVideoItem, IptvChannel, MovieApiCategory } from '../model/OnlineMedia';
 import { MovieCard, ChannelCard, CategoryChip } from '../components/OnlineMediaCard';
+import { AppLanguage } from '../common/Enums';
+import { LocalizationManager } from '../utils/LocalizationManager';
+import { SettingsService } from '../service/SettingsService';
 
 /**
  * 在线视频页面
@@ -42,8 +45,16 @@ struct OnlinePage {
 
   private sourceManager: SourceManager = SourceManager.getInstance();
   private downloadManager: DownloadManager = DownloadManager.getInstance();
+  @StorageLink('appLanguage') appLanguage: AppLanguage = AppLanguage.SYSTEM;
+  private loc: LocalizationManager = LocalizationManager.getInstance();
 
   async aboutToAppear(): Promise<void> {
+    // Load persisted language
+    try {
+      const savedLang: AppLanguage = await SettingsService.getInstance().getLanguage();
+      this.loc.setLanguage(savedLang);
+      AppStorage.set('appLanguage', savedLang);
+    } catch (e) { }
     this.sourceManager.setContext(getContext(this));
     this.downloadManager.setContext(getContext(this));
     await this.initSafeArea();
@@ -92,36 +103,35 @@ struct OnlinePage {
     // Extract movie items from union type
     const movieItems: OnlineVideoItem[] = [];
     if (content) {
-      for (let i = 0; i < content.length; i++) {
-        const item = content[i];
-        const itemTitle = item['title'];
-        const itemUrl = item['url'];
-        if (itemTitle !== undefined && itemUrl !== undefined) {
+      const videos = content as OnlineVideoItem[];
+      for (let i = 0; i < videos.length; i++) {
+        const item: OnlineVideoItem = videos[i];
+        if (item.title.length > 0 && item.url.length > 0) {
           const video: OnlineVideoItem = {
-            id: String(item['id'] || ''),
-            title: String(itemTitle),
-            url: String(itemUrl),
+            id: item.id || '',
+            title: item.title,
+            url: item.url,
           };
-          if (item['thumbnail'] !== undefined) {
-            video.thumbnail = String(item['thumbnail']);
+          if (item.thumbnail) {
+            video.thumbnail = item.thumbnail;
           }
-          if (item['category'] !== undefined) {
-            video.category = String(item['category']);
+          if (item.category) {
+            video.category = item.category;
           }
-          if (item['description'] !== undefined) {
-            video.description = String(item['description']);
+          if (item.description) {
+            video.description = item.description;
           }
-          if (item['year'] !== undefined) {
-            video.year = String(item['year']);
+          if (item.year) {
+            video.year = item.year;
           }
-          if (item['rating'] !== undefined) {
-            video.rating = String(item['rating']);
+          if (item.rating) {
+            video.rating = item.rating;
           }
-          if (item['actors'] !== undefined) {
-            video.actors = String(item['actors']);
+          if (item.actors) {
+            video.actors = item.actors;
           }
-          if (item['director'] !== undefined) {
-            video.director = String(item['director']);
+          if (item.director) {
+            video.director = item.director;
           }
           movieItems.push(video);
         }
@@ -196,20 +206,20 @@ struct OnlinePage {
     // Extract IPTV channels from union type
     const channelItems: IptvChannel[] = [];
     if (content) {
-      for (let i = 0; i < content.length; i++) {
-        const item = content[i];
-        const itemUrl = item['url'];
-        if (itemUrl !== undefined) {
+      const channels = content as IptvChannel[];
+      for (let i = 0; i < channels.length; i++) {
+        const item: IptvChannel = channels[i];
+        if (item.url.length > 0) {
           const channel: IptvChannel = {
-            id: String(item['id'] || ''),
-            name: String(item['name'] || ''),
-            url: String(itemUrl),
+            id: item.id || '',
+            name: item.name || '',
+            url: item.url,
           };
-          if (item['group'] !== undefined) {
-            channel.group = String(item['group']);
+          if (item.group) {
+            channel.group = item.group;
           }
-          if (item['logo'] !== undefined) {
-            channel.logo = String(item['logo']);
+          if (item.logo) {
+            channel.logo = item.logo;
           }
           channelItems.push(channel);
         }
@@ -323,12 +333,32 @@ struct OnlinePage {
           .fillColor('#333333')
           .onClick(() => router.back())
 
-        Text('在线视频')
+        Text(this.loc.getString('online_title'))
           .fontSize(20)
           .fontWeight(FontWeight.Bold)
           .fontColor('#333333')
           .margin({ left: 12 })
           .layoutWeight(1)
+
+        // Search button
+        Image($r('app.media.ic_search'))
+          .width(22)
+          .height(22)
+          .fillColor('#666666')
+          .padding(6)
+          .onClick(() => {
+            router.pushUrl({ url: 'pages/SearchPage' });
+          })
+
+        // Settings button
+        Image($r('app.media.ic_settings'))
+          .width(22)
+          .height(22)
+          .fillColor('#666666')
+          .padding(6)
+          .onClick(() => {
+            router.pushUrl({ url: 'pages/SettingsPage' });
+          })
 
         // Add source button
         Button({ type: ButtonType.Circle, stateEffect: true }) {
@@ -339,6 +369,7 @@ struct OnlinePage {
         .width(32)
         .height(32)
         .backgroundColor('#FF4081')
+        .margin({ left: 6 })
         .onClick(() => {
           this.showAddSourceDialog = true;
         })
@@ -352,7 +383,7 @@ struct OnlinePage {
       if (this.showAddSourceDialog) {
         Column({ space: 10 }) {
           Row({ space: 8 }) {
-            Text('添加媒体源')
+            Text(this.loc.getString('online_add_source'))
               .fontSize(15)
               .fontWeight(FontWeight.Medium)
               .fontColor('#333333')
@@ -367,7 +398,7 @@ struct OnlinePage {
           .width('100%')
 
           Row({ space: 8 }) {
-            Button('影视')
+            Button(this.loc.getString('online_movies'))
               .fontSize(13)
               .type(ButtonType.Normal)
               .backgroundColor(this.newSourceType === 'movie' ? '#FF4081' : '#F0F0F0')
@@ -385,7 +416,7 @@ struct OnlinePage {
               .onClick(() => { this.newSourceType = 'iptv'; })
           }
 
-          TextInput({ placeholder: '源名称', text: this.newSourceName })
+          TextInput({ placeholder: this.loc.getString('online_source_name'), text: this.newSourceName })
             .height(40)
             .fontSize(14)
             .backgroundColor('#F5F5F5')
@@ -393,7 +424,7 @@ struct OnlinePage {
             .padding({ left: 12, right: 12 })
             .onChange((value: string) => { this.newSourceName = value; })
 
-          TextInput({ placeholder: '源地址 (URL)', text: this.newSourceUrl })
+          TextInput({ placeholder: this.loc.getString('online_source_url'), text: this.newSourceUrl })
             .height(40)
             .fontSize(14)
             .backgroundColor('#F5F5F5')
@@ -401,7 +432,7 @@ struct OnlinePage {
             .padding({ left: 12, right: 12 })
             .onChange((value: string) => { this.newSourceUrl = value; })
 
-          Button('确认添加')
+          Button(this.loc.getString('online_confirm_add'))
             .width('100%')
             .height(40)
             .fontSize(14)
@@ -421,12 +452,12 @@ struct OnlinePage {
         TabContent() {
           this.MovieTabContent()
         }
-        .tabBar(this.TabLabel('影视', this.activeTab === 0))
+        .tabBar(this.TabLabel(this.loc.getString('online_movies'), this.activeTab === 0))
 
         TabContent() {
           this.IptvTabContent()
         }
-        .tabBar(this.TabLabel('直播', this.activeTab === 1))
+        .tabBar(this.TabLabel(this.loc.getString('online_live'), this.activeTab === 1))
       }
       .onChange((index: number) => {
         this.activeTab = index;
@@ -465,7 +496,7 @@ struct OnlinePage {
   MovieTabContent() {
     Column() {
       if (this.movieSources.length === 0) {
-        this.EmptyStateBuilder('暂未添加影视源', '点击右上角 + 添加', () => { this.showAddSourceDialog = true; })
+        this.EmptyStateBuilder(this.loc.getString('online_no_movie_source'), this.loc.getString('online_no_movie_hint'), () => { this.showAddSourceDialog = true; })
       } else {
         // Source selector
         this.SourceSelectorBuilder(
@@ -485,7 +516,7 @@ struct OnlinePage {
             ListItem() {
               Row({ space: 0 }) {
                 CategoryChip({
-                  label: '全部',
+                  label: this.loc.getString('online_all'),
                   isActive: this.selectedCategoryId.length === 0,
                   onClicked: () => {
                     this.selectedCategoryId = '';
@@ -521,7 +552,7 @@ struct OnlinePage {
           .justifyContent(FlexAlign.Center)
         } else if (this.filteredMovies.length === 0) {
           Column({ space: 8 }) {
-            Text('暂无内容')
+            Text(this.loc.getString('online_no_content'))
               .fontSize(15)
               .fontColor('#999999')
           }
@@ -556,7 +587,7 @@ struct OnlinePage {
   IptvTabContent() {
     Column() {
       if (this.iptvSources.length === 0) {
-        this.EmptyStateBuilder('暂未添加 IPTV 直播源', '点击右上角 + 添加 M3U/TXT 源', () => { this.showAddSourceDialog = true; })
+        this.EmptyStateBuilder(this.loc.getString('online_no_iptv_source'), this.loc.getString('online_no_iptv_hint'), () => { this.showAddSourceDialog = true; })
       } else {
         // Source selector
         this.SourceSelectorBuilder(
@@ -576,7 +607,7 @@ struct OnlinePage {
             ListItem() {
               Row({ space: 0 }) {
                 CategoryChip({
-                  label: '全部',
+                  label: this.loc.getString('online_all'),
                   isActive: this.selectedChannelGroup.length === 0,
                   onClicked: () => {
                     this.selectedChannelGroup = '';
@@ -612,7 +643,7 @@ struct OnlinePage {
           .justifyContent(FlexAlign.Center)
         } else if (this.filteredChannels.length === 0) {
           Column({ space: 8 }) {
-            Text('暂无频道')
+            Text(this.loc.getString('online_no_channel'))
               .fontSize(15)
               .fontColor('#999999')
           }
@@ -620,7 +651,7 @@ struct OnlinePage {
           .layoutWeight(1)
           .justifyContent(FlexAlign.Center)
         } else {
-          Text(`${this.filteredChannels.length} 个频道`)
+          Text(`${this.filteredChannels.length} ${this.loc.getString('online_channels')}`)
             .fontSize(12)
             .fontColor('#999999')
             .padding({ left: 16, top: 8, bottom: 4 })
@@ -697,7 +728,7 @@ struct OnlinePage {
       Text(subtitle)
         .fontSize(13)
         .fontColor('#CCCCCC')
-      Button('添加源')
+      Button(this.loc.getString('online_add'))
         .fontSize(14)
         .onClick(() => onAction())
     }

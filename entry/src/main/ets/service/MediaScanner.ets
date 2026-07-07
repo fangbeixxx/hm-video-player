@@ -110,10 +110,11 @@ export class MediaScanner {
    */
   private async generateThumbnail(asset: photoAccessHelper.PhotoAsset): Promise<string> {
     try {
-      const pixelMap: image.PixelMap = await asset.getThumbnail({
+      const size: image.Size = {
         width: Constants.THUMBNAIL_WIDTH,
         height: Constants.THUMBNAIL_HEIGHT
-      } as photoAccessHelper.ThumbnailOptions);
+      };
+      const pixelMap: image.PixelMap = await asset.getThumbnail(size);
 
       const packer = image.createImagePacker();
       const packOpts: image.PackingOption = {
@@ -214,16 +215,32 @@ export class MediaScanner {
   private getFileSystemRoots(): Array<string> {
     const roots: Array<string> = [];
 
+    // 应用私有目录（所有设备类型均支持）
     try {
-      roots.push(Environment.getUserDownloadDir());
-    } catch (error) {
-      console.warn('[MediaScanner] getUserDownloadDir failed: ' + JSON.stringify(error));
+      const ctx = getContext(this);
+      roots.push(ctx.filesDir);
+    } catch (e) {
+      console.warn('[MediaScanner] getContext failed: ' + JSON.stringify(e));
     }
 
+    // 用户下载目录（部分设备可能不支持，静默忽略）
     try {
-      roots.push(Environment.getUserDocumentDir());
-    } catch (error) {
-      console.warn('[MediaScanner] getUserDocumentDir failed: ' + JSON.stringify(error));
+      const dir: string = Environment.getUserDownloadDir();
+      if (dir.length > 0) {
+        roots.push(dir);
+      }
+    } catch (e) {
+      console.warn('[MediaScanner] getUserDownloadDir failed: ' + JSON.stringify(e));
+    }
+
+    // 用户文档目录（部分设备可能不支持，静默忽略）
+    try {
+      const dir: string = Environment.getUserDocumentDir();
+      if (dir.length > 0) {
+        roots.push(dir);
+      }
+    } catch (e) {
+      console.warn('[MediaScanner] getUserDocumentDir failed: ' + JSON.stringify(e));
     }
 
     const uniqueRoots: Array<string> = [];
