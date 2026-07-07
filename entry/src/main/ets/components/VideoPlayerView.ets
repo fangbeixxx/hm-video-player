@@ -434,17 +434,13 @@ export struct VideoPlayerView {
       this.ijkPlayer.reset();
       this.ijkPlayer.setDebug(true);
       this.ijkPlayer.setVolume(this.isMuted ? '0' : '1.0', this.isMuted ? '0' : '1.0');
-      this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, 'enable-accurate-seek', '1');
-      this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, 'max-buffer-size', '102400');
-      this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, 'min-frames', '100');
+      // Essential options — keep minimal for broad device compatibility
       this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, 'start-on-prepared', '1');
-      this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, 'packet-buffering', '0');
-      this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, 'framedrop', '5');
+      this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, 'enable-accurate-seek', '1');
+      this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, 'max-buffer-size', '3072000');
+      this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, 'min-frames', '5');
+      this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, 'framedrop', '1');
       this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, 'max_cached_duration', '3000');
-      this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, 'soundtouch', '1');
-      this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, 'mediacodec-all-videos', '1');
-      this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, 'mediacodec-hevc', '1');
-      this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, 'overlay-format', '842094158');
       this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, 'subtitle', this.subtitlesEnabled ? '1' : '0');
       this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, 'timeout', '10000000');
       this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, 'connect_timeout', '10000000');
@@ -453,6 +449,13 @@ export struct VideoPlayerView {
       this.ijkPlayer.setSpeed(`${this.currentSpeed}f`);
       this.ijkPlayer.setLoopCount(false);
       this.ijkPlayer.setScreenOnWhilePlaying(true);
+      // HTTP/HLS streaming support
+      this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, 'user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+      this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, 'reconnect', '1');
+      this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, 'reconnect_streamed', '1');
+      this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, 'reconnect_delay_max', '5');
+      this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, 'multiple_requests', '1');
+      this.ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, 'http-detect-range-support', '1');
       this.ijkPlayer.setDataSource(this.videoPath);
       this.ijkPlayer.setMessageListener();
       this.ijkPlayer.prepareAsync();

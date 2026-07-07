@@ -410,25 +410,36 @@ struct Index {
           })
 
         // 搜索按钮
-        Image($r('app.media.ic_search'))
-          .width(22)
-          .height(22)
-          .fillColor('#666666')
-          .padding(8)
-          .onClick(() => {
-            router.pushUrl({ url: 'pages/SearchPage' });
-          })
+        Row() {
+          Image($r('app.media.ic_search'))
+            .width(18)
+            .height(18)
+            .fillColor('#666666')
+        }
+        .width(32)
+        .height(32)
+        .justifyContent(FlexAlign.Center)
+        .border({ width: 1, color: '#DDDDDD', radius: 4 })
+        .margin({ left: 8 })
+        .onClick(() => {
+          router.pushUrl({ url: 'pages/SearchPage' });
+        })
 
         // 设置按钮
-        Image($r('app.media.ic_settings'))
-          .width(22)
-          .height(22)
-          .fillColor('#666666')
-          .padding(8)
-          .margin({ left: 4 })
-          .onClick(() => {
-            router.pushUrl({ url: 'pages/SettingsPage' });
-          })
+        Row() {
+          Image($r('app.media.ic_settings'))
+            .width(18)
+            .height(18)
+            .fillColor('#666666')
+        }
+        .width(32)
+        .height(32)
+        .justifyContent(FlexAlign.Center)
+        .border({ width: 1, color: '#DDDDDD', radius: 4 })
+        .margin({ left: 6 })
+        .onClick(() => {
+          router.pushUrl({ url: 'pages/SettingsPage' });
+        })
       }
       .width('100%')
       .height(56)
@@ -440,17 +451,17 @@ struct Index {
         TabContent() {
           this.AllVideosTab()
         }
-        .tabBar(this.TabItem(this.loc.getString('index_local_videos'), this.selectedTab === 0))
+        .tabBar(this.TabItem(this.loc.getString('index_local_videos'), 0))
 
         TabContent() {
           this.RecentTab()
         }
-        .tabBar(this.TabItem(this.loc.getString('index_recent'), this.selectedTab === 1))
+        .tabBar(this.TabItem(this.loc.getString('index_recent'), 1))
 
         TabContent() {
           this.FavoritesTab()
         }
-        .tabBar(this.TabItem(this.loc.getString('index_favorites'), this.selectedTab === 2))
+        .tabBar(this.TabItem(this.loc.getString('index_favorites'), 2))
       }
       .onChange((index: number) => {
         this.selectedTab = index;
@@ -466,18 +477,18 @@ struct Index {
   }
 
   @Builder
-  TabItem(title: string, isActive: boolean) {
+  TabItem(title: string, index: number) {
     Column({ space: 4 }) {
       Text(title)
         .fontSize(14)
-        .fontWeight(isActive ? FontWeight.Medium : FontWeight.Normal)
-        .fontColor(isActive ? '#FF4081' : '#999999')
+        .fontWeight(this.selectedTab === index ? FontWeight.Medium : FontWeight.Normal)
+        .fontColor(this.selectedTab === index ? '#FF4081' : '#999999')
 
       // 选中指示线
       Divider()
         .width(24)
         .height(2)
-        .color(isActive ? '#FF4081' : 'transparent')
+        .color(this.selectedTab === index ? '#FF4081' : 'transparent')
         .borderRadius(1)
     }
     .width('100%')

@@ -5,6 +5,10 @@ import { SettingsService } from '../service/SettingsService';
 import { PlaybackSpeed, ScreenOrientation, AppLanguage } from '../common/Enums';
 import { LocalizationManager } from '../utils/LocalizationManager';
 
+interface SpeedOption { label: string; value: PlaybackSpeed; }
+interface OrientOption { label: string; value: ScreenOrientation; }
+interface LangOption { label: string; value: AppLanguage; }
+
 @Entry
 @Component
 struct SettingsPage {
@@ -17,6 +21,11 @@ struct SettingsPage {
   @State wifiOnly: boolean = true;
   @State historyCount: number = 0;
   @State safeAreaTop: number = 0;
+
+  // Option dialogs
+  @State showSpeedDialog: boolean = false;
+  @State showOrientationDialog: boolean = false;
+  @State showLanguageDialog: boolean = false;
 
   @StorageLink('appLanguage') appLanguage: AppLanguage = AppLanguage.SYSTEM;
   private historyService: PlayHistoryService = PlayHistoryService.getInstance();
@@ -70,7 +79,8 @@ struct SettingsPage {
   }
 
   build() {
-    Column() {
+    Stack() {
+      Column() {
       Column()
         .width('100%')
         .height(this.safeAreaTop)
@@ -110,46 +120,53 @@ struct SettingsPage {
         }
 
         ListItem() {
-          this.SwitchItem(this.loc.getString('settings_auto_play_next'), this.autoPlayNext, async (val: boolean) => {
-            this.autoPlayNext = val;
-            await this.settingsService.setAutoPlayNext(val);
-          })
+          Row() {
+            Text(this.loc.getString('settings_auto_play_next'))
+              .fontSize(15).fontColor('#333333').layoutWeight(1)
+            Toggle({ type: ToggleType.Switch, isOn: this.autoPlayNext })
+              .onChange(async (isOn: boolean) => {
+                this.autoPlayNext = isOn;
+                await this.settingsService.setAutoPlayNext(isOn);
+              })
+          }
+          .width('100%').height(52).padding({ left: 24, right: 16 }).backgroundColor('#FFFFFF')
         }
 
         ListItem() {
-          this.SwitchItem(this.loc.getString('settings_hw_accel'), this.hwAcceleration, async (val: boolean) => {
-            this.hwAcceleration = val;
-            await this.settingsService.setHwAcceleration(val);
-          })
+          Row() {
+            Text(this.loc.getString('settings_hw_accel'))
+              .fontSize(15).fontColor('#333333').layoutWeight(1)
+            Toggle({ type: ToggleType.Switch, isOn: this.hwAcceleration })
+              .onChange(async (isOn: boolean) => {
+                this.hwAcceleration = isOn;
+                await this.settingsService.setHwAcceleration(isOn);
+              })
+          }
+          .width('100%').height(52).padding({ left: 24, right: 16 }).backgroundColor('#FFFFFF')
         }
 
         ListItem() {
-          this.SwitchItem(this.loc.getString('settings_background_play'), this.backgroundPlay, async (val: boolean) => {
-            this.backgroundPlay = val;
-            await this.settingsService.setBackgroundPlay(val);
-          })
+          Row() {
+            Text(this.loc.getString('settings_background_play'))
+              .fontSize(15).fontColor('#333333').layoutWeight(1)
+            Toggle({ type: ToggleType.Switch, isOn: this.backgroundPlay })
+              .onChange(async (isOn: boolean) => {
+                this.backgroundPlay = isOn;
+                await this.settingsService.setBackgroundPlay(isOn);
+              })
+          }
+          .width('100%').height(52).padding({ left: 24, right: 16 }).backgroundColor('#FFFFFF')
         }
 
         ListItem() {
           Row() {
             Text(this.loc.getString('settings_default_speed'))
-              .fontSize(15)
-              .fontColor('#333333')
-              .layoutWeight(1)
-            Text(this.getSpeedLabel(this.defaultSpeed))
-              .fontSize(13)
-              .fontColor('#999999')
-            Image($r('app.media.ic_arrow_right'))
-              .width(16)
-              .height(16)
-              .fillColor('#CCCCCC')
-              .margin({ left: 4 })
+              .fontSize(15).fontColor('#333333').layoutWeight(1)
+            Text(this.getSpeedLabel(this.defaultSpeed)).fontSize(13).fontColor('#999999')
+            Image($r('app.media.ic_arrow_right')).width(16).height(16).fillColor('#CCCCCC').margin({ left: 4 })
           }
-          .width('100%')
-          .height(52)
-          .padding({ left: 24, right: 16 })
-          .backgroundColor('#FFFFFF')
-          .onClick(() => { this.cycleSpeed(); })
+          .width('100%').height(52).padding({ left: 24, right: 16 }).backgroundColor('#FFFFFF')
+          .onClick(() => { this.showSpeedDialog = true; })
         }
 
         ListItem() {
@@ -159,52 +176,36 @@ struct SettingsPage {
         ListItem() {
           Row() {
             Text(this.loc.getString('settings_orientation'))
-              .fontSize(15)
-              .fontColor('#333333')
-              .layoutWeight(1)
-            Text(this.getOrientationLabel(this.orientation))
-              .fontSize(13)
-              .fontColor('#999999')
-            Image($r('app.media.ic_arrow_right'))
-              .width(16)
-              .height(16)
-              .fillColor('#CCCCCC')
-              .margin({ left: 4 })
+              .fontSize(15).fontColor('#333333').layoutWeight(1)
+            Text(this.getOrientationLabel(this.orientation)).fontSize(13).fontColor('#999999')
+            Image($r('app.media.ic_arrow_right')).width(16).height(16).fillColor('#CCCCCC').margin({ left: 4 })
           }
-          .width('100%')
-          .height(52)
-          .padding({ left: 24, right: 16 })
-          .backgroundColor('#FFFFFF')
-          .onClick(() => { this.cycleOrientation(); })
+          .width('100%').height(52).padding({ left: 24, right: 16 }).backgroundColor('#FFFFFF')
+          .onClick(() => { this.showOrientationDialog = true; })
         }
 
         ListItem() {
           Row() {
             Text(this.loc.getString('settings_language'))
-              .fontSize(15)
-              .fontColor('#333333')
-              .layoutWeight(1)
-            Text(this.loc.getLanguageLabel())
-              .fontSize(13)
-              .fontColor('#999999')
-            Image($r('app.media.ic_arrow_right'))
-              .width(16)
-              .height(16)
-              .fillColor('#CCCCCC')
-              .margin({ left: 4 })
+              .fontSize(15).fontColor('#333333').layoutWeight(1)
+            Text(this.loc.getLanguageLabel()).fontSize(13).fontColor('#999999')
+            Image($r('app.media.ic_arrow_right')).width(16).height(16).fillColor('#CCCCCC').margin({ left: 4 })
           }
-          .width('100%')
-          .height(52)
-          .padding({ left: 24, right: 16 })
-          .backgroundColor('#FFFFFF')
-          .onClick(() => { this.cycleLanguage(); })
+          .width('100%').height(52).padding({ left: 24, right: 16 }).backgroundColor('#FFFFFF')
+          .onClick(() => { this.showLanguageDialog = true; })
         }
 
         ListItem() {
-          this.SwitchItem(this.loc.getString('settings_show_subtitles'), this.showSubtitle, async (val: boolean) => {
-            this.showSubtitle = val;
-            await this.settingsService.setShowSubtitle(val);
-          })
+          Row() {
+            Text(this.loc.getString('settings_show_subtitles'))
+              .fontSize(15).fontColor('#333333').layoutWeight(1)
+            Toggle({ type: ToggleType.Switch, isOn: this.showSubtitle })
+              .onChange(async (isOn: boolean) => {
+                this.showSubtitle = isOn;
+                await this.settingsService.setShowSubtitle(isOn);
+              })
+          }
+          .width('100%').height(52).padding({ left: 24, right: 16 }).backgroundColor('#FFFFFF')
         }
 
         ListItem() {
@@ -212,10 +213,16 @@ struct SettingsPage {
         }
 
         ListItem() {
-          this.SwitchItem(this.loc.getString('settings_wifi_only'), this.wifiOnly, async (val: boolean) => {
-            this.wifiOnly = val;
-            await this.settingsService.setWifiOnly(val);
-          })
+          Row() {
+            Text(this.loc.getString('settings_wifi_only'))
+              .fontSize(15).fontColor('#333333').layoutWeight(1)
+            Toggle({ type: ToggleType.Switch, isOn: this.wifiOnly })
+              .onChange(async (isOn: boolean) => {
+                this.wifiOnly = isOn;
+                await this.settingsService.setWifiOnly(isOn);
+              })
+          }
+          .width('100%').height(52).padding({ left: 24, right: 16 }).backgroundColor('#FFFFFF')
         }
 
         ListItem() {
@@ -225,24 +232,14 @@ struct SettingsPage {
         ListItem() {
           Row() {
             Text(this.loc.getString('settings_history'))
-              .fontSize(15)
-              .fontColor('#333333')
-              .layoutWeight(1)
-
+              .fontSize(15).fontColor('#333333').layoutWeight(1)
             Text(`${this.historyCount} ${this.loc.getString('settings_records')}`)
-              .fontSize(13)
-              .fontColor('#999999')
-
+              .fontSize(13).fontColor('#999999')
             Text(this.loc.getString('settings_clear'))
-              .fontSize(14)
-              .fontColor('#FF4081')
-              .margin({ left: 12 })
+              .fontSize(14).fontColor('#FF4081').margin({ left: 12 })
               .onClick(() => this.clearHistory())
           }
-          .width('100%')
-          .height(52)
-          .padding({ left: 24, right: 16 })
-          .backgroundColor('#FFFFFF')
+          .width('100%').height(52).padding({ left: 24, right: 16 }).backgroundColor('#FFFFFF')
         }
 
         ListItem() {
@@ -252,18 +249,10 @@ struct SettingsPage {
         ListItem() {
           Row() {
             Text(this.loc.getString('settings_version'))
-              .fontSize(15)
-              .fontColor('#333333')
-              .layoutWeight(1)
-
-            Text('v1.0.0')
-              .fontSize(13)
-              .fontColor('#999999')
+              .fontSize(15).fontColor('#333333').layoutWeight(1)
+            Text('v1.0.0').fontSize(13).fontColor('#999999')
           }
-          .width('100%')
-          .height(52)
-          .padding({ left: 24, right: 16 })
-          .backgroundColor('#FFFFFF')
+          .width('100%').height(52).padding({ left: 24, right: 16 }).backgroundColor('#FFFFFF')
         }
       }
       .layoutWeight(1)
@@ -273,6 +262,97 @@ struct SettingsPage {
     .width('100%')
     .height('100%')
     .backgroundColor('#F5F5F5')
+
+    // ═══ Speed Dialog ═══
+    if (this.showSpeedDialog) {
+      Stack() {
+        Column().width('100%').height('100%').backgroundColor('rgba(0,0,0,0.4)')
+          .onClick(() => { this.showSpeedDialog = false; })
+        Column() {
+          Text(this.loc.getString('settings_default_speed'))
+            .fontSize(16).fontWeight(FontWeight.Medium).fontColor('#333333')
+            .padding({ left: 20, right: 20, top: 16, bottom: 12 })
+          List({ space: 0 }) {
+            ForEach(this.getSpeedOptions(), (opt: SpeedOption) => {
+              ListItem() {
+                Row() {
+                  Text(opt.label).fontSize(15).fontColor('#333333').layoutWeight(1)
+                  if (opt.value === this.defaultSpeed) {
+                    Text('✓').fontSize(16).fontColor('#FF4081')
+                  }
+                }
+                .width('100%').height(48).padding({ left: 20, right: 20 })
+                .onClick(() => { this.defaultSpeed = opt.value; this.settingsService.setDefaultSpeed(opt.value); this.showSpeedDialog = false; })
+              }
+            })
+          }
+          .divider({ color: '#F0F0F0', strokeWidth: 0.5 })
+        }
+        .width('80%').backgroundColor('#FFFFFF').borderRadius(12)
+      }
+      .width('100%').height('100%').position({ x: 0, y: 0 })
+    }
+
+    // ═══ Orientation Dialog ═══
+    if (this.showOrientationDialog) {
+      Stack() {
+        Column().width('100%').height('100%').backgroundColor('rgba(0,0,0,0.4)')
+          .onClick(() => { this.showOrientationDialog = false; })
+        Column() {
+          Text(this.loc.getString('settings_orientation'))
+            .fontSize(16).fontWeight(FontWeight.Medium).fontColor('#333333')
+            .padding({ left: 20, right: 20, top: 16, bottom: 12 })
+          List({ space: 0 }) {
+            ForEach(this.getOrientationOptions(), (opt: OrientOption) => {
+              ListItem() {
+                Row() {
+                  Text(opt.label).fontSize(15).fontColor('#333333').layoutWeight(1)
+                  if (opt.value === this.orientation) {
+                    Text('✓').fontSize(16).fontColor('#FF4081')
+                  }
+                }
+                .width('100%').height(48).padding({ left: 20, right: 20 })
+                .onClick(() => { this.orientation = opt.value; this.settingsService.setOrientation(opt.value); this.showOrientationDialog = false; })
+              }
+            })
+          }
+          .divider({ color: '#F0F0F0', strokeWidth: 0.5 })
+        }
+        .width('80%').backgroundColor('#FFFFFF').borderRadius(12)
+      }
+      .width('100%').height('100%').position({ x: 0, y: 0 })
+    }
+
+    // ═══ Language Dialog ═══
+    if (this.showLanguageDialog) {
+      Stack() {
+        Column().width('100%').height('100%').backgroundColor('rgba(0,0,0,0.4)')
+          .onClick(() => { this.showLanguageDialog = false; })
+        Column() {
+          Text(this.loc.getString('settings_language'))
+            .fontSize(16).fontWeight(FontWeight.Medium).fontColor('#333333')
+            .padding({ left: 20, right: 20, top: 16, bottom: 12 })
+          List({ space: 0 }) {
+            ForEach(this.getLanguageOptions(), (opt: LangOption) => {
+              ListItem() {
+                Row() {
+                  Text(opt.label).fontSize(15).fontColor('#333333').layoutWeight(1)
+                  if (opt.value === this.loc.getLanguage()) {
+                    Text('✓').fontSize(16).fontColor('#FF4081')
+                  }
+                }
+                .width('100%').height(48).padding({ left: 20, right: 20 })
+                .onClick(() => { this.loc.setLanguage(opt.value); AppStorage.set('appLanguage', opt.value); this.settingsService.setLanguage(opt.value); this.showLanguageDialog = false; })
+              }
+            })
+          }
+          .divider({ color: '#F0F0F0', strokeWidth: 0.5 })
+        }
+        .width('80%').backgroundColor('#FFFFFF').borderRadius(12)
+      }
+      .width('100%').height('100%').position({ x: 0, y: 0 })
+    }
+    }
   }
 
   @Builder
@@ -338,17 +418,6 @@ struct SettingsPage {
     }
   }
 
-  private async cycleSpeed(): Promise<void> {
-    const speeds: PlaybackSpeed[] = [
-      PlaybackSpeed.SPEED_0_5, PlaybackSpeed.SPEED_0_75,
-      PlaybackSpeed.SPEED_1_0, PlaybackSpeed.SPEED_1_25,
-      PlaybackSpeed.SPEED_1_5, PlaybackSpeed.SPEED_2_0
-    ];
-    const idx = speeds.indexOf(this.defaultSpeed);
-    this.defaultSpeed = speeds[(idx + 1) % speeds.length];
-    await this.settingsService.setDefaultSpeed(this.defaultSpeed);
-  }
-
   private getOrientationLabel(orientation: ScreenOrientation): string {
     switch (orientation) {
       case ScreenOrientation.LANDSCAPE: return this.loc.getString('orient_landscape');
@@ -357,23 +426,32 @@ struct SettingsPage {
     }
   }
 
-  private async cycleOrientation(): Promise<void> {
-    const orientations: ScreenOrientation[] = [
-      ScreenOrientation.AUTO, ScreenOrientation.LANDSCAPE, ScreenOrientation.PORTRAIT
-    ];
-    const idx = orientations.indexOf(this.orientation);
-    this.orientation = orientations[(idx + 1) % orientations.length];
-    await this.settingsService.setOrientation(this.orientation);
+  // ─── Option dialog data ───
+
+  private getSpeedOptions(): SpeedOption[] {
+    const opts: SpeedOption[] = [];
+    opts.push({ label: '0.5x', value: PlaybackSpeed.SPEED_0_5 });
+    opts.push({ label: '0.75x', value: PlaybackSpeed.SPEED_0_75 });
+    opts.push({ label: '1.0x', value: PlaybackSpeed.SPEED_1_0 });
+    opts.push({ label: '1.25x', value: PlaybackSpeed.SPEED_1_25 });
+    opts.push({ label: '1.5x', value: PlaybackSpeed.SPEED_1_5 });
+    opts.push({ label: '2.0x', value: PlaybackSpeed.SPEED_2_0 });
+    return opts;
   }
 
-  private async cycleLanguage(): Promise<void> {
-    const langs: AppLanguage[] = [
-      AppLanguage.SYSTEM, AppLanguage.ZH_CN, AppLanguage.EN_US
-    ];
-    const currentIdx: number = langs.indexOf(this.loc.getLanguage());
-    const nextLang: AppLanguage = langs[(currentIdx + 1) % langs.length];
-    this.loc.setLanguage(nextLang);
-    AppStorage.set('appLanguage', nextLang);
-    await this.settingsService.setLanguage(nextLang);
+  private getOrientationOptions(): OrientOption[] {
+    const opts: OrientOption[] = [];
+    opts.push({ label: this.loc.getString('orient_auto'), value: ScreenOrientation.AUTO });
+    opts.push({ label: this.loc.getString('orient_landscape'), value: ScreenOrientation.LANDSCAPE });
+    opts.push({ label: this.loc.getString('orient_portrait'), value: ScreenOrientation.PORTRAIT });
+    return opts;
+  }
+
+  private getLanguageOptions(): LangOption[] {
+    const opts: LangOption[] = [];
+    opts.push({ label: this.loc.getString('lang_system'), value: AppLanguage.SYSTEM });
+    opts.push({ label: this.loc.getString('lang_zh'), value: AppLanguage.ZH_CN });
+    opts.push({ label: this.loc.getString('lang_en'), value: AppLanguage.EN_US });
+    return opts;
   }
 }

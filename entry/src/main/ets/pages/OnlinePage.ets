@@ -452,12 +452,12 @@ struct OnlinePage {
         TabContent() {
           this.MovieTabContent()
         }
-        .tabBar(this.TabLabel(this.loc.getString('online_movies'), this.activeTab === 0))
+        .tabBar(this.TabLabel(this.loc.getString('online_movies'), 0))
 
         TabContent() {
           this.IptvTabContent()
         }
-        .tabBar(this.TabLabel(this.loc.getString('online_live'), this.activeTab === 1))
+        .tabBar(this.TabLabel(this.loc.getString('online_live'), 1))
       }
       .onChange((index: number) => {
         this.activeTab = index;
@@ -473,16 +473,16 @@ struct OnlinePage {
   }
 
   @Builder
-  TabLabel(label: string, isActive: boolean) {
+  TabLabel(label: string, index: number) {
     Column({ space: 4 }) {
       Text(label)
         .fontSize(15)
-        .fontWeight(isActive ? FontWeight.Medium : FontWeight.Normal)
-        .fontColor(isActive ? '#FF4081' : '#999999')
+        .fontWeight(this.activeTab === index ? FontWeight.Medium : FontWeight.Normal)
+        .fontColor(this.activeTab === index ? '#FF4081' : '#999999')
       Divider()
         .width(24)
         .height(2)
-        .color(isActive ? '#FF4081' : 'transparent')
+        .color(this.activeTab === index ? '#FF4081' : 'transparent')
         .borderRadius(1)
     }
     .width('100%')

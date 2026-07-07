@@ -117,6 +117,7 @@ export class SourceManager {
     }
 
     console.info('[SourceManager] fetching content from: ' + source.url);
+    const lowerUrl: string = source.url.toLowerCase();
     try {
       const content = await this.httpGet(source.url);
       if (content.length === 0) {
@@ -125,7 +126,6 @@ export class SourceManager {
       }
 
       let result: OnlineVideoItem[] | IptvChannel[] | null = null;
-      const lowerUrl: string = source.url.toLowerCase();
 
       // Dispatch by file extension first, then by source type
       if (lowerUrl.endsWith('.m3u') || lowerUrl.endsWith('.m3u8')) {
@@ -153,6 +153,15 @@ export class SourceManager {
       return result;
     } catch (error) {
       console.error('[SourceManager] fetch failed for ' + source.name + ': ' + JSON.stringify(error));
+      // 对于无法拉取的 IPTV/M3U8 源，将 URL 本身作为一个频道返回
+      if (source.type === 'iptv' || lowerUrl.endsWith('.m3u') || lowerUrl.endsWith('.m3u8')) {
+        const fallback: IptvChannel = {
+          id: source.id,
+          name: source.name,
+          url: source.url
+        };
+        return [fallback];
+      }
       return cached || null;
     }
   }
@@ -199,8 +208,10 @@ export class SourceManager {
         {
           method: http.RequestMethod.GET,
           header: {
-            'User-Agent': 'HarmonyOS-VideoPlayer/1.0',
-            'Accept': '*/*'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': '*/*',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Connection': 'keep-alive'
           },
           connectTimeout: 15000,
           readTimeout: 30000
